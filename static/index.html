@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gemini OpenAI Proxy • Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              500: '#0ea5e9',
+              600: '#0284c7'
+            },
+            dark: {
+              bg: '#090d16',
+              surface: '#0f172a',
+              card: '#1e293b',
+              border: '#334155'
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #090d16;
+      color: #f1f5f9;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    }
+    .glass {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(51, 65, 85, 0.7);
+    }
+    .code-block {
+      background: #020617;
+      border: 1px solid #1e293b;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    }
+    /* Unified Usage Bar Colors */
+    .bar-normal {
+      background: linear-gradient(90deg, #10b981, #06b6d4);
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+    }
+    .bar-warning {
+      background: linear-gradient(90deg, #eab308, #f59e0b);
+      box-shadow: 0 0 12px rgba(234, 179, 8, 0.4);
+    }
+    .bar-danger {
+      background: linear-gradient(90deg, #ef4444, #dc2626);
+      box-shadow: 0 0 14px rgba(239, 68, 68, 0.5);
+    }
+    .bar-critical {
+      background: #09090b;
+      border: 1px solid #ef4444;
+      box-shadow: inset 0 0 10px rgba(239, 68, 68, 0.8), 0 0 8px rgba(0, 0, 0, 0.9);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased" onclick="closeDropdownsOnClickOutside(event)">
+
+  <!-- Navbar Superior -->
+  <header class="sticky top-0 z-50 glass border-b border-dark-border px-6 py-3.5">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-sky-600 via-indigo-600 to-purple-600 flex items-center justify-center shadow-lg shadow-sky-500/20">
+          <svg class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <h1 class="text-base font-bold tracking-tight text-white" id="txt-title">Gemini OpenAI Proxy</h1>
+            <span id="header-status-badge" class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <span id="header-status-dot" class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5"></span>
+              <span id="txt-status-pill">Online • :8000</span>
+            </span>
+          </div>
+          <p class="text-xs text-slate-400" id="txt-subtitle">Ponte Oficial para Hermes Agent • Google AI Pro</p>
+        </div>
+      </div>
+
+      <!-- Ações do Topo -->
+      <div class="flex items-center gap-3">
+        <!-- Seletor de Idioma -->
+        <div class="flex items-center bg-dark-card border border-dark-border rounded-lg p-0.5 text-xs font-medium">
+          <button id="btn-lang-pt" onclick="changeLanguage('pt-BR')" class="px-2.5 py-1 rounded-md transition-all">
+            🇧🇷 PT
+          </button>
+          <button id="btn-lang-en" onclick="changeLanguage('en')" class="px-2.5 py-1 rounded-md transition-all">
+            🇺🇸 EN
+          </button>
+        </div>
+
+        <!-- Dropdown de Gerenciamento de Múltiplas Contas -->
+        <div class="relative" id="account-dropdown-wrapper">
+          <button id="account-dropdown-btn" onclick="toggleAccountDropdown(event)" class="flex items-center gap-2 bg-dark-card hover:bg-slate-800 border border-dark-border px-3 py-1.5 rounded-lg text-xs transition-all shadow-sm">
+            <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+            <span class="font-mono text-slate-200 font-medium max-w-[170px] truncate" id="account-email">Carregando...</span>
+            <span class="bg-sky-500/20 text-sky-300 text-[10px] font-bold px-1.5 py-0.5 rounded border border-sky-500/30">AI PRO</span>
+            <svg id="account-chevron" class="w-3.5 h-3.5 text-slate-400 transition-transform duration-200" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+          </button>
+
+          <!-- Menu Dropdown -->
+          <div id="account-dropdown-menu" class="hidden absolute right-0 mt-2 w-80 bg-slate-900/95 backdrop-blur-xl border border-dark-border rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-dark-border">
+            <div class="p-3 bg-dark-card/60">
+              <div class="text-[11px] font-semibold uppercase tracking-wider text-slate-400" id="dd-title">Contas Conectadas</div>
+              <div class="text-[10px] text-slate-500 mt-0.5" id="dd-desc">Apenas 1 conta ativa por vez é usada para o proxy</div>
+            </div>
+            
+            <!-- Lista Dinâmica de Contas -->
+            <div id="accounts-list-container" class="max-h-56 overflow-y-auto divide-y divide-dark-border/40">
+              <!-- Renderizado via JS -->
+            </div>
+
+            <!-- Ações do Dropdown -->
+            <div class="p-2 bg-dark-card/40 space-y-1">
+              <button onclick="startGoogleOAuth()" class="w-full text-left px-3 py-2 text-xs text-sky-400 hover:bg-sky-500/10 rounded-lg flex items-center gap-2 font-medium transition-colors">
+                <svg class="w-4 h-4 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+                <span id="dd-btn-add">+ Adicionar Conta Google</span>
+              </button>
+              <button onclick="signOutCurrentAccount()" class="w-full text-left px-3 py-2 text-xs text-rose-400 hover:bg-rose-500/10 rounded-lg flex items-center gap-2 font-medium transition-colors">
+                <svg class="w-4 h-4 text-rose-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                <span id="dd-btn-signout">Sair da Conta Ativa</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- Navegação por Abas -->
+  <div class="border-b border-dark-border bg-dark-surface/50 px-6">
+    <div class="max-w-7xl mx-auto flex gap-1">
+      <button onclick="switchTab('dashboard')" id="tab-btn-dashboard" class="tab-btn border-b-2 border-sky-500 text-sky-400 font-medium px-4 py-3 text-sm flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+        <span id="tab-txt-dashboard">Painel & Cotas</span>
+      </button>
+      <button onclick="switchTab('models')" id="tab-btn-models" class="tab-btn border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium px-4 py-3 text-sm flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+        <span id="tab-txt-models">Catálogo de Modelos</span>
+      </button>
+      <button onclick="switchTab('guide')" id="tab-btn-guide" class="tab-btn border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium px-4 py-3 text-sm flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>
+        <span id="tab-txt-guide">Guia de Conexão</span>
+      </button>
+      <button onclick="switchTab('settings')" id="tab-btn-settings" class="tab-btn border-b-2 border-transparent text-slate-400 hover:text-slate-200 font-medium px-4 py-3 text-sm flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+        <span id="tab-txt-settings">Configurações</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Conteúdo Principal -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-6 py-8">
+
+    <!-- ABA 1: PAINEL & COTAS -->
+    <div id="view-dashboard" class="space-y-8">
+      
+      <!-- Cards de Resumo -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+        
+        <!-- Card 1: Assinatura -->
+        <div class="glass p-5 rounded-2xl relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400" id="card-txt-sub">Assinatura Ativa</span>
+            <span class="p-2 rounded-xl bg-sky-500/10 text-sky-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            </span>
+          </div>
+          <div class="text-xl font-bold text-white mb-1">Google AI Pro</div>
+          <div class="text-xs text-slate-400 flex items-center gap-1.5">
+            <span class="w-2 h-2 rounded-full bg-emerald-400"></span>
+            Tier: <span class="font-mono text-slate-200" id="card-tier">g1-pro-tier</span>
+          </div>
+        </div>
+
+        <!-- Card 2: Conta Ativa -->
+        <div class="glass p-5 rounded-2xl relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400" id="card-txt-auth">Conta Ativa em Uso</span>
+            <span class="p-2 rounded-xl bg-emerald-500/10 text-emerald-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+            </span>
+          </div>
+          <div class="text-base font-bold text-white mb-1 truncate font-mono" id="card-email-active">Carregando...</div>
+          <div class="text-xs text-slate-400" id="card-acc-source">Sessão oficial Antigravity / OAuth</div>
+        </div>
+
+        <!-- Card 3: Projeto & Endpoint -->
+        <div class="glass p-5 rounded-2xl relative overflow-hidden">
+          <div class="flex items-center justify-between mb-3">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-400" id="card-txt-proj">Infraestrutura</span>
+            <span class="p-2 rounded-xl bg-purple-500/10 text-purple-400">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/></svg>
+            </span>
+          </div>
+          <div class="text-base font-bold text-white mb-1 font-mono" id="card-project">aicode-consumers</div>
+          <div class="text-xs text-slate-400">daily-cloudcode-pa.googleapis.com</div>
+        </div>
+
+      </div>
+
+      <!-- Barra de Controle de Servidor: Iniciar / Parar -->
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between bg-dark-card/60 border border-dark-border px-6 py-4 rounded-2xl gap-4">
+        <div class="flex items-center gap-3">
+          <div id="server-status-dot" class="w-3.5 h-3.5 rounded-full bg-emerald-400 animate-pulse"></div>
+          <div>
+            <div class="text-xs font-semibold text-white flex items-center gap-2">
+              <span id="txt-server-state-label">Estado do Servidor Proxy:</span>
+              <span id="server-status-text" class="text-emerald-400 font-bold">Operacional • Escutando na porta 8000</span>
+            </div>
+            <p class="text-[11px] text-slate-400 mt-0.5" id="txt-auto-refresh-note">
+              As cotas são atualizadas automaticamente a cada 1 minuto (janela de 5h minuto a minuto, mensal dia a dia).
+            </p>
+          </div>
+        </div>
+        <button id="btn-server-toggle" onclick="toggleServerState()" class="px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg flex items-center justify-center gap-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30">
+          <span id="btn-server-icon">⏹️</span>
+          <span id="btn-server-text">Parar Servidor</span>
+        </button>
+      </div>
+
+      <!-- Seção de Cotas Aglutinadas: Pools Gemini & Claude -->
+      <div>
+        <div class="mb-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <h2 class="text-lg font-bold text-white flex items-center gap-2" id="quota-headline">
+              Consumo de Cota em Tempo Real (Pools Aglutinados)
+            </h2>
+            <p class="text-xs text-slate-400 mt-0.5" id="quota-desc">
+              Os modelos Gemini e Claude compartilham buckets de cota dedicados do seu plano Google AI Pro.
+            </p>
+          </div>
+          <!-- Legenda de cores da barra única -->
+          <div class="flex items-center gap-2 text-[11px] text-slate-400 bg-dark-card/60 border border-dark-border px-3 py-1.5 rounded-lg">
+            <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> 0-50%</span>
+            <span class="flex items-center gap-1 ml-2"><span class="w-2 h-2 rounded-full bg-amber-400"></span> &gt;50%</span>
+            <span class="flex items-center gap-1 ml-2"><span class="w-2 h-2 rounded-full bg-rose-500"></span> &ge;75%</span>
+            <span class="flex items-center gap-1 ml-2"><span class="w-2 h-2 rounded-full bg-zinc-900 border border-rose-500"></span> &ge;90%</span>
+          </div>
+        </div>
+
+        <!-- Container dos Cards de Pool -->
+        <div id="pools-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          
+          <!-- Pool 1: Gemini (Placeholder inicial) -->
+          <div class="glass p-6 rounded-2xl border border-dark-border animate-pulse">
+            <div class="h-6 bg-slate-800 rounded w-1/3 mb-4"></div>
+            <div class="h-4 bg-slate-800 rounded w-full mb-3"></div>
+            <div class="h-10 bg-slate-800 rounded w-full"></div>
+          </div>
+
+          <!-- Pool 2: Claude (Placeholder inicial) -->
+          <div class="glass p-6 rounded-2xl border border-dark-border animate-pulse">
+            <div class="h-6 bg-slate-800 rounded w-1/3 mb-4"></div>
+            <div class="h-4 bg-slate-800 rounded w-full mb-3"></div>
+            <div class="h-10 bg-slate-800 rounded w-full"></div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ABA 2: MODELOS DISPONÍVEIS -->
+    <div id="view-models" class="space-y-6 hidden">
+      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h2 class="text-lg font-bold text-white" id="models-headline">Catálogo de Modelos</h2>
+          <p class="text-xs text-slate-400 mt-1" id="models-desc">
+            Modelos suportados pela sua cota e totalmente compatíveis com Function Calling no Hermes Agent.
+          </p>
+        </div>
+        <button onclick="syncHermes()" id="btn-sync-hermes-models" class="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs shadow-lg shadow-emerald-500/20 transition-all active:scale-95 whitespace-nowrap">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+          <span id="txt-sync-btn-1">⚡ Sincronizar com Hermes Agent</span>
+        </button>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="models-container">
+        <!-- Renderizado dinamicamente via JS -->
+      </div>
+    </div>
+
+    <!-- ABA 3: GUIA DE CONEXÃO -->
+    <div id="view-guide" class="space-y-6 hidden">
+      <div>
+        <h2 class="text-lg font-bold text-white" id="guide-headline">Como Conectar Agentes ao Proxy</h2>
+        <p class="text-xs text-slate-400 mt-1">
+          O proxy expõe a especificação oficial da OpenAI (`/v1/chat/completions` e `/v1/models`).
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        
+        <!-- Hermes Agent -->
+        <div class="glass p-6 rounded-2xl space-y-4">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-sm">H</div>
+              <div>
+                <h3 class="text-sm font-bold text-white">Hermes Agent (Recomendado)</h3>
+                <p class="text-xs text-slate-400">Totalmente integrado para tool calling local</p>
+              </div>
+            </div>
+            <button onclick="syncHermes()" id="btn-sync-hermes-guide" class="text-xs font-semibold px-3 py-1.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition flex items-center gap-1.5 active:scale-95">
+              <span>⚡</span> <span id="txt-sync-btn-2">Exportar Modelos (1 Clique)</span>
+            </button>
+          </div>
+          <p class="text-xs text-slate-300">
+            Exporta e registra automaticamente todos os 14 modelos no <code>~/.hermes/config.yaml</code> e no cache do Hermes (igual ao OpenRouter!). Você pode usá-los diretamente:
+          </p>
+          <div class="relative">
+            <button onclick="copyCode(this)" class="absolute top-2.5 right-2.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">Copiar</button>
+            <pre class="code-block p-4 rounded-xl text-xs text-emerald-400 overflow-x-auto"><code># Usar via provider registrado no config.yaml:
+hermes --provider custom:google-ai-pro -m gemini-3.8-flash-high
+
+# Ou com qualquer outro modelo do catálogo:
+hermes --provider custom:google-ai-pro -m claude-sonnet-5-5-high
+
+# Ou via variáveis de ambiente padrão OpenAI:
+export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
+export OPENAI_API_KEY="google-ai-pro-proxy"
+hermes run "Analise os arquivos do projeto"</code></pre>
+          </div>
+          <div class="text-[11px] text-slate-400 bg-dark-card/60 p-3 rounded-lg border border-dark-border">
+            💡 <b>Exportação Automática:</b> O Hermes descobre os modelos via <code>/v1/models</code> e armazena em cache no <code>provider_models_cache.json</code>. Ao sincronizar, todos os modelos ficam acessíveis sem precisar digitar manualmente.
+          </div>
+        </div>
+
+        <!-- Claude Code -->
+        <div class="glass p-6 rounded-2xl space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-sm">C</div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Claude Code</h3>
+              <p class="text-xs text-slate-400">Conecte via wrapper OpenAI</p>
+            </div>
+          </div>
+          <p class="text-xs text-slate-300">Inicie apontando para o proxy:</p>
+          <div class="relative">
+            <button onclick="copyCode(this)" class="absolute top-2.5 right-2.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">Copiar</button>
+            <pre class="code-block p-4 rounded-xl text-xs text-purple-400 overflow-x-auto"><code>export OPENAI_BASE_URL="http://127.0.0.1:8000/v1"
+export OPENAI_API_KEY="google-ai-pro-proxy"
+
+claude --model gemini-3.8-flash-high</code></pre>
+          </div>
+        </div>
+
+        <!-- Cursor & Cline -->
+        <div class="glass p-6 rounded-2xl space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-sm">VS</div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Cursor / Cline / Roo Code</h3>
+              <p class="text-xs text-slate-400">Configuração direta nas preferências</p>
+            </div>
+          </div>
+          <ul class="text-xs text-slate-300 space-y-1.5 list-disc list-inside">
+            <li><b>Provider:</b> OpenAI Compatible</li>
+            <li><b>Base URL:</b> <code class="text-sky-300 bg-slate-800 px-1 py-0.5 rounded">http://127.0.0.1:8000/v1</code></li>
+            <li><b>API Key:</b> <code class="text-sky-300 bg-slate-800 px-1 py-0.5 rounded">google-ai-pro-proxy</code></li>
+            <li><b>Model ID:</b> <code class="text-sky-300 bg-slate-800 px-1 py-0.5 rounded">gemini-3.8-flash-high</code></li>
+          </ul>
+        </div>
+
+        <!-- Python OpenAI SDK -->
+        <div class="glass p-6 rounded-2xl space-y-4">
+          <div class="flex items-center gap-3">
+            <div class="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-sm">Py</div>
+            <div>
+              <h3 class="text-sm font-bold text-white">Python (OpenAI SDK)</h3>
+              <p class="text-xs text-slate-400">Integração nativa com 4 linhas</p>
+            </div>
+          </div>
+          <div class="relative">
+            <button onclick="copyCode(this)" class="absolute top-2.5 right-2.5 text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-1 rounded border border-slate-700">Copiar</button>
+            <pre class="code-block p-4 rounded-xl text-xs text-blue-300 overflow-x-auto"><code>from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8000/v1",
+    api_key="proxy"
+)
+
+res = client.chat.completions.create(
+    model="gemini-3.8-flash-high",
+    messages=[{"role": "user", "content": "Olá!"}]
+)
+print(res.choices[0].message.content)</code></pre>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- ABA 4: CONFIGURAÇÕES -->
+    <div id="view-settings" class="space-y-6 hidden">
+      <div>
+        <h2 class="text-lg font-bold text-white" id="settings-headline">Configurações do Servidor</h2>
+        <p class="text-xs text-slate-400 mt-1" id="settings-desc">Ajuste os parâmetros de escuta, chaves de API e idioma do proxy.</p>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Card 1: Rede e Idioma -->
+        <div class="glass p-6 rounded-2xl space-y-5">
+          <div class="flex items-center gap-2 mb-1">
+            <h3 class="text-sm font-bold text-white" id="txt-cfg-general-title">Rede e Idioma</h3>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1.5" id="lbl-cfg-lang">Idioma da Interface e Terminal:</label>
+            <select id="cfg-language" class="w-full bg-dark-card border border-dark-border text-white text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500">
+              <option value="pt-BR">🇧🇷 Português (Brasil)</option>
+              <option value="en">🇺🇸 English (US)</option>
+            </select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5" id="lbl-cfg-host">Endereço (Host):</label>
+              <input type="text" id="cfg-host" value="127.0.0.1" class="w-full bg-dark-card border border-dark-border text-white text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 font-mono">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1.5" id="lbl-cfg-port">Porta:</label>
+              <input type="number" id="cfg-port" value="8000" class="w-full bg-dark-card border border-dark-border text-white text-xs rounded-xl px-3.5 py-2.5 focus:outline-none focus:border-sky-500 font-mono">
+            </div>
+          </div>
+
+          <div class="pt-2 flex items-center justify-between">
+            <button onclick="saveSettings()" class="px-5 py-2.5 bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs rounded-xl transition shadow-lg shadow-sky-500/20" id="btn-save-settings">
+              Salvar Configurações
+            </button>
+            <span id="save-status" class="text-xs text-emerald-400 hidden">✓ Configurações salvas!</span>
+          </div>
+        </div>
+
+        <!-- Card 2: Gerenciamento de Chaves de API (Opcional) -->
+        <div class="glass p-6 rounded-2xl space-y-5">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="text-sm font-bold text-white" id="txt-keys-title">Gerenciamento de Chaves de API (Opcional)</h3>
+                <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" id="txt-keys-optional-badge">Opcional</span>
+              </div>
+              <p class="text-xs text-slate-400 mt-1 leading-relaxed" id="txt-keys-desc">
+                O uso de chaves é opcional. Se nenhuma chave for cadastrada, o proxy aceita qualquer valor ou requisições em branco. Havendo chaves cadastradas, apenas clientes com uma chave válida terão acesso.
+              </p>
+            </div>
+            <button onclick="promptCreateApiKey()" class="px-3.5 py-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-semibold text-xs rounded-xl transition shadow-lg shadow-sky-500/20 flex items-center gap-1.5 shrink-0 active:scale-95">
+              <span>+</span>
+              <span id="btn-txt-create-key">Gerar Chave</span>
+            </button>
+          </div>
+
+          <!-- Status de Autenticação -->
+          <div id="keys-auth-status" class="text-xs p-3 rounded-xl border flex items-center gap-2.5">
+            <!-- Renderizado dinamicamente -->
+          </div>
+
+          <!-- Lista de Chaves -->
+          <div class="space-y-2.5 max-h-[280px] overflow-y-auto pr-1" id="api-keys-list-container">
+            <!-- Renderizado dinamicamente -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Modal: Nova Chave de API Gerada -->
+  <div id="modal-key-generated" class="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass p-6 rounded-2xl max-w-md w-full border border-sky-500/40 space-y-4 shadow-2xl">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xl">
+          🔑
+        </div>
+        <div>
+          <h3 class="text-base font-bold text-white" id="modal-key-title">Nova Chave de API Gerada</h3>
+          <p class="text-xs text-slate-400" id="modal-key-subtitle">Copie sua chave agora para conectar o Hermes ou outros clientes:</p>
+        </div>
+      </div>
+
+      <div class="p-3 bg-slate-950 rounded-xl border border-slate-800 flex items-center justify-between gap-2">
+        <input type="text" readonly id="modal-key-input" class="bg-transparent font-mono text-xs text-emerald-400 w-full focus:outline-none select-all" />
+        <button onclick="copyModalKey(this)" id="btn-modal-copy" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg border border-slate-700 transition shrink-0">
+          Copiar
+        </button>
+      </div>
+
+      <div class="text-[11px] text-slate-400 leading-relaxed bg-dark-card/60 p-3 rounded-lg border border-dark-border/40">
+        💡 <span id="modal-key-note">A chave pode ser visualizada, copiada ou excluída a qualquer momento na lista de chaves.</span>
+      </div>
+
+      <div class="pt-2 flex justify-end">
+        <button onclick="closeKeyModal()" class="px-6 py-2 rounded-xl bg-sky-500 hover:bg-sky-600 text-white font-semibold text-xs transition shadow-lg shadow-sky-500/20 font-bold">
+          OK
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Estado Global da Aplicação
+    let currentLang = 'pt-BR';
+    let serverRunning = true;
+    let quotaPoolsData = [];
+    let accountsData = { active_account: null, accounts: [] };
+    let apiKeysData = [];
+    let revealedKeys = new Set();
+    let oauthPollInterval = null;
+
+    // Catálogo de modelos para a aba Modelos
+    const MODELS_CATALOG = [
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Effort Dinâmico)', provider: 'Google', tags: ['Recomendado', 'Effort Adaptativo', 'Ultra Rápido'], desc: 'Totalmente compatível com o gerenciador de esforço do Hermes: escala entre low, medium e high automaticamente conforme o reasoning_effort.' },
+      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (Effort Dinâmico)', provider: 'Anthropic', tags: ['Recomendado', 'Coding Specialist', 'Effort Adaptativo'], desc: 'O modelo de referência para codificação. O esforço de pensamento e thinking budget são ajustados dinamicamente pelo Hermes.' },
+      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (Effort Dinâmico)', provider: 'Anthropic', tags: ['Raciocínio Máximo', 'Alta Fidelidade'], desc: 'Máxima capacidade de raciocínio conceitual para arquitetura de software complexa.' },
+      { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High Fixo)', provider: 'Google', tags: ['Fixed Tier', 'Deep Thinking'], desc: 'Força sempre o nível máximo de raciocínio (32k thinking budget).' },
+      { id: 'claude-sonnet-5-5-high', name: 'Claude Sonnet 5.5 (High Fixo)', provider: 'Anthropic', tags: ['Fixed Tier', 'Deep Thinking'], desc: 'Fixado no tier mais alto de raciocínio da Anthropic.' },
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google', tags: ['Econômico', 'Baixa Latência'], desc: 'Respostas instantâneas para comandos diretos e validações rápidas.' }
+    ];
+
+    // Inicialização
+    document.addEventListener('DOMContentLoaded', async () => {
+      // Disparo imediato e simultâneo para resposta instantânea ao abrir ou atualizar a página
+      loadQuotas();
+      loadServerStatus();
+      loadAccounts();
+      loadApiKeys();
+      renderModelsCatalog();
+      
+      // Polling automático da cota a cada 60 segundos (1 minuto)
+      setInterval(loadQuotas, 60000);
+
+      // Decremento suave dos contadores regressivos a cada 1 segundo
+      setInterval(tickCountdowns, 1000);
+    });
+
+    // Atualização imediata também ao focar na janela/aba
+    window.addEventListener('focus', loadQuotas);
+
+    // Alternar Abas
+    function switchTab(tabId) {
+      ['dashboard', 'models', 'guide', 'settings'].forEach(id => {
+        document.getElementById(`view-${id}`).classList.add('hidden');
+        const btn = document.getElementById(`tab-btn-${id}`);
+        btn.classList.remove('border-sky-500', 'text-sky-400');
+        btn.classList.add('border-transparent', 'text-slate-400');
+      });
+
+      document.getElementById(`view-${tabId}`).classList.remove('hidden');
+      const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+      activeBtn.classList.remove('border-transparent', 'text-slate-400');
+      activeBtn.classList.add('border-sky-500', 'text-sky-400');
+    }
+
+    // ==========================================
+    // 1. GERENCIAMENTO DE ESTADO DO SERVIDOR
+    // ==========================================
+    async function loadServerStatus() {
+      try {
+        const res = await fetch('/api/server/status');
+        if (res.ok) {
+          const data = await res.json();
+          serverRunning = !!data.running;
+          updateServerUI();
+        }
+      } catch (e) {
+        console.error('Erro ao ler status do servidor:', e);
+      }
+    }
+
+    async function toggleServerState() {
+      try {
+        const res = await fetch('/api/server/toggle', { method: 'POST' });
+        if (res.ok) {
+          const data = await res.json();
+          serverRunning = !!data.running;
+          updateServerUI();
+        }
+      } catch (e) {
+        alert('Erro ao alternar estado do servidor: ' + e.message);
+      }
+    }
+
+    function updateServerUI() {
+      const btn = document.getElementById('btn-server-toggle');
+      const icon = document.getElementById('btn-server-icon');
+      const text = document.getElementById('btn-server-text');
+      const dot = document.getElementById('server-status-dot');
+      const statusText = document.getElementById('server-status-text');
+      const headerDot = document.getElementById('header-status-dot');
+      const headerText = document.getElementById('txt-status-pill');
+
+      if (serverRunning) {
+        btn.className = 'px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg flex items-center justify-center gap-2 bg-rose-500/15 hover:bg-rose-500/25 text-rose-400 border border-rose-500/30';
+        icon.innerText = '⏹️';
+        text.innerText = currentLang === 'pt-BR' ? 'Parar Servidor' : 'Stop Server';
+        dot.className = 'w-3.5 h-3.5 rounded-full bg-emerald-400 animate-pulse';
+        statusText.className = 'text-emerald-400 font-bold';
+        statusText.innerText = currentLang === 'pt-BR' ? 'Operacional • Escutando na porta 8000' : 'Operational • Listening on port 8000';
+        
+        headerDot.className = 'w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse mr-1.5';
+        headerText.innerText = 'Online • :8000';
+      } else {
+        btn.className = 'px-5 py-2.5 rounded-xl font-semibold text-xs transition-all shadow-lg flex items-center justify-center gap-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 border border-emerald-500/40';
+        icon.innerText = '▶️';
+        text.innerText = currentLang === 'pt-BR' ? 'Iniciar Servidor' : 'Start Server';
+        dot.className = 'w-3.5 h-3.5 rounded-full bg-amber-400';
+        statusText.className = 'text-amber-400 font-bold';
+        statusText.innerText = currentLang === 'pt-BR' ? 'Pausado • Requisições bloqueadas' : 'Paused • Requests blocked';
+
+        headerDot.className = 'w-1.5 h-1.5 rounded-full bg-amber-400 mr-1.5';
+        headerText.innerText = currentLang === 'pt-BR' ? 'Pausado • :8000' : 'Paused • :8000';
+      }
+    }
+
+    // ==========================================
+    // 2. MULTI-CONTAS & DROPDOWN GOOGLE OAUTH
+    // ==========================================
+    async function loadAccounts() {
+      try {
+        const res = await fetch('/api/accounts');
+        if (res.ok) {
+          accountsData = await res.json();
+          renderAccountsDropdown();
+        }
+      } catch (e) {
+        console.error('Erro ao listar contas:', e);
+      }
+    }
+
+    function toggleAccountDropdown(event) {
+      if (event) event.stopPropagation();
+      const menu = document.getElementById('account-dropdown-menu');
+      const chevron = document.getElementById('account-chevron');
+      const isHidden = menu.classList.contains('hidden');
+      if (isHidden) {
+        menu.classList.remove('hidden');
+        chevron.classList.add('rotate-180');
+      } else {
+        menu.classList.add('hidden');
+        chevron.classList.remove('rotate-180');
+      }
+    }
+
+    function closeDropdownsOnClickOutside(event) {
+      const wrapper = document.getElementById('account-dropdown-wrapper');
+      if (wrapper && !wrapper.contains(event.target)) {
+        document.getElementById('account-dropdown-menu').classList.add('hidden');
+        document.getElementById('account-chevron').classList.remove('rotate-180');
+      }
+    }
+
+    function renderAccountsDropdown() {
+      const emailBadge = document.getElementById('account-email');
+      const cardEmail = document.getElementById('card-email-active');
+      const listContainer = document.getElementById('accounts-list-container');
+      const active = accountsData.active_account || 'Nenhuma conta';
+
+      emailBadge.innerText = active;
+      cardEmail.innerText = active;
+
+      listContainer.innerHTML = '';
+      const accounts = accountsData.accounts || [];
+
+      if (accounts.length === 0) {
+        listContainer.innerHTML = `<div class="p-3 text-xs text-slate-400 text-center">Nenhuma conta cadastrada.</div>`;
+        return;
+      }
+
+      accounts.forEach(acc => {
+        const isActive = acc.email === accountsData.active_account;
+        const div = document.createElement('div');
+        div.className = `flex items-center justify-between px-3 py-2.5 transition cursor-pointer ${isActive ? 'bg-sky-500/10' : 'hover:bg-slate-800/60'}`;
+        div.onclick = (e) => {
+          if (!e.target.closest('.btn-remove-acc')) {
+            switchAccount(acc.email);
+          }
+        };
+
+        div.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0 pr-2">
+            <div class="w-2 h-2 rounded-full shrink-0 ${isActive ? 'bg-emerald-400 shadow-sm shadow-emerald-400/50' : 'bg-slate-500'}"></div>
+            <div class="min-w-0">
+              <div class="text-xs font-mono font-medium truncate ${isActive ? 'text-sky-300 font-bold' : 'text-slate-300'}">
+                ${acc.email}
+              </div>
+              <div class="text-[10px] text-slate-400 flex items-center gap-1.5">
+                <span>${acc.tier || 'Google AI Pro'}</span>
+                ${isActive ? '<span class="text-emerald-400 font-bold text-[9px] bg-emerald-500/10 px-1 rounded">ATIVA</span>' : ''}
+              </div>
+            </div>
+          </div>
+          <button title="Remover / Deslogar conta" onclick="removeAccount('${acc.email}', event)" class="btn-remove-acc p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition shrink-0">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+        `;
+        listContainer.appendChild(div);
+      });
+    }
+
+    async function switchAccount(email) {
+      try {
+        const res = await fetch('/api/accounts/switch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        if (res.ok) {
+          toggleAccountDropdown();
+          await loadAccounts();
+          await loadQuotas();
+        }
+      } catch (e) {
+        alert('Erro ao alternar conta: ' + e.message);
+      }
+    }
+
+    async function removeAccount(email, event) {
+      if (event) event.stopPropagation();
+      const msg = currentLang === 'pt-BR' 
+        ? `Deseja realmente remover/deslogar a conta ${email}?` 
+        : `Do you really want to remove/sign out account ${email}?`;
+      
+      if (confirm(msg)) {
+        try {
+          const res = await fetch('/api/accounts/remove', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email })
+          });
+          if (res.ok) {
+            await loadAccounts();
+            await loadQuotas();
+          }
+        } catch (e) {
+          alert('Erro ao remover conta: ' + e.message);
+        }
+      }
+    }
+
+    async function signOutCurrentAccount() {
+      if (accountsData.active_account) {
+        await removeAccount(accountsData.active_account);
+      }
+    }
+
+    async function startGoogleOAuth() {
+      try {
+        const res = await fetch('/api/oauth/start');
+        if (!res.ok) throw new Error('Falha ao iniciar listener OAuth');
+        const data = await res.json();
+        
+        if (data.auth_url) {
+          // Abre janela pop-up para login do Google
+          const w = 600, h = 750;
+          const left = (window.innerWidth - w) / 2;
+          const top = (window.innerHeight - h) / 2;
+          const popup = window.open(data.auth_url, 'google_oauth_login', `width=${w},height=${h},top=${top},left=${left},scrollbars=yes`);
+
+          // Polling para checar conclusão do OAuth
+          if (oauthPollInterval) clearInterval(oauthPollInterval);
+          oauthPollInterval = setInterval(async () => {
+            try {
+              const stRes = await fetch('/api/oauth/status');
+              if (stRes.ok) {
+                const st = await stRes.json();
+                if (st.completed) {
+                  clearInterval(oauthPollInterval);
+                  if (popup && !popup.closed) popup.close();
+                  toggleAccountDropdown();
+                  await loadAccounts();
+                  await loadQuotas();
+                  alert(currentLang === 'pt-BR' ? `Conta ${st.email} conectada com sucesso!` : `Account ${st.email} connected successfully!`);
+                } else if (st.error) {
+                  clearInterval(oauthPollInterval);
+                  alert('Erro OAuth: ' + st.error);
+                }
+              }
+            } catch (err) {
+              console.error(err);
+            }
+          }, 1500);
+        }
+      } catch (e) {
+        alert('Erro ao iniciar fluxo OAuth: ' + e.message);
+      }
+    }
+
+    // ==========================================
+    // 3. COTAS AGLUTINADAS & BARRA DE CONSUMO ÚNICA
+    // ==========================================
+    async function loadQuotas() {
+      try {
+        const res = await fetch('/v1/quota?t=' + Date.now(), { cache: 'no-store' });
+        if (!res.ok) throw new Error('Falha ao obter cota');
+        const data = await res.json();
+
+        if (data.pools) {
+          quotaPoolsData = data.pools;
+          renderPools(data.pools);
+        }
+
+        if (data.tier) {
+          document.getElementById('card-tier').innerText = data.tier;
+        }
+        if (data.project) {
+          document.getElementById('card-project').innerText = data.project;
+        }
+        if (data.email) {
+          document.getElementById('card-email-active').innerText = data.email;
+          document.getElementById('account-email').innerText = data.email;
+        }
+      } catch (e) {
+        console.error('Erro ao atualizar cotas:', e);
+      }
+    }
+
+    function getBarColorInfo(used) {
+      if (used > 50 && used < 75) {
+        return { barClass: 'bar-warning', textClass: 'text-amber-400' };
+      } else if (used >= 75 && used < 90) {
+        return { barClass: 'bar-danger', textClass: 'text-rose-400' };
+      } else if (used >= 90) {
+        return { barClass: 'bar-critical', textClass: 'text-rose-300' };
+      }
+      return { barClass: 'bar-normal', textClass: 'text-emerald-400' };
+    }
+
+    function formatSecondsDelta(sec) {
+      if (sec === undefined || sec === null || sec <= 0) return currentLang === 'pt-BR' ? 'agora' : 'now';
+      const days = Math.floor(sec / 86400);
+      const hours = Math.floor((sec % 86400) / 3600);
+      const mins = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      if (days > 0) {
+        return `${days}d ${hours}h`;
+      } else if (hours > 0) {
+        return `${hours}h ${mins}m`;
+      } else if (mins > 0) {
+        return `${mins}m ${s}s`;
+      } else {
+        return `${s}s`;
+      }
+    }
+
+    function renderPools(pools) {
+      const container = document.getElementById('pools-container');
+      container.innerHTML = '';
+
+      pools.forEach(pool => {
+        // Métricas da Janela de 5 Horas
+        const used5h = Math.min(100, Math.max(0, pool.used_percent_5h !== undefined ? pool.used_percent_5h : (pool.used_percent || 0)));
+        const rem5h = Math.min(100, Math.max(0, pool.remaining_percent_5h !== undefined ? pool.remaining_percent_5h : (pool.remaining_percent || 100)));
+        const color5h = getBarColorInfo(used5h);
+
+        // Métricas da Cota Semanal
+        const usedW = Math.min(100, Math.max(0, pool.used_percent_weekly !== undefined ? pool.used_percent_weekly : 0));
+        const remW = Math.min(100, Math.max(0, pool.remaining_percent_weekly !== undefined ? pool.remaining_percent_weekly : 100));
+        const colorW = getBarColorInfo(usedW);
+
+        const isGoogle = pool.provider === 'google';
+        const iconSvg = isGoogle
+          ? `<svg class="w-6 h-6 text-sky-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>`
+          : `<svg class="w-6 h-6 text-purple-400" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>`;
+
+        const card = document.createElement('div');
+        card.className = 'glass p-6 rounded-2xl border border-dark-border flex flex-col justify-between hover:border-slate-600 transition';
+        card.innerHTML = `
+          <div class="space-y-5">
+            <!-- Cabeçalho do Pool -->
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-3">
+                <div class="p-2.5 rounded-xl ${isGoogle ? 'bg-sky-500/10' : 'bg-purple-500/10'}">
+                  ${iconSvg}
+                </div>
+                <div>
+                  <h3 class="text-base font-bold text-white flex items-center gap-2">
+                    ${pool.name}
+                    <span class="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${pool.badge}</span>
+                  </h3>
+                  <p class="text-xs text-slate-400">${pool.subtitle}</p>
+                </div>
+              </div>
+            </div>
+
+            <!-- BARRA 1: LIMITE DE 5H -->
+            <div class="bg-dark-card/50 p-4 rounded-xl border border-dark-border/60 space-y-2.5">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-white flex items-center gap-1.5">
+                  <span>⏱️</span>
+                  <span>${currentLang === 'pt-BR' ? 'Limite de 5h' : '5h Limit'}</span>
+                </span>
+                <div class="text-[11px] font-mono text-sky-400 countdown-5h font-bold" data-pool="${pool.id}">
+                  ${pool.time_until_reset_5h ? `⏳ ${pool.time_until_reset_5h}` : '—'}
+                </div>
+              </div>
+
+              <div class="flex justify-between items-baseline text-xs">
+                <div class="font-medium text-slate-200">
+                  <span class="font-bold text-sm ${color5h.textClass}">${used5h}%</span> ${currentLang === 'pt-BR' ? 'usado' : 'used'}
+                  <span class="text-slate-400 font-normal">(${rem5h}% ${currentLang === 'pt-BR' ? 'disponível' : 'available'})</span>
+                </div>
+              </div>
+
+              <!-- Trilha com Preenchimento Dinâmico 5h -->
+              <div class="w-full bg-zinc-800/90 rounded-full h-3.5 p-0.5 overflow-hidden border border-zinc-700/60 shadow-inner">
+                <div class="${color5h.barClass} h-full rounded-full transition-all duration-700 ease-out" style="width: ${used5h}%;"></div>
+              </div>
+            </div>
+
+            <!-- BARRA 2: LIMITE SEMANAL -->
+            <div class="bg-dark-card/50 p-4 rounded-xl border border-dark-border/60 space-y-2.5">
+              <div class="flex justify-between items-center text-xs">
+                <span class="font-bold text-white flex items-center gap-1.5">
+                  <span>📊</span>
+                  <span>${currentLang === 'pt-BR' ? 'Limite Semanal' : 'Weekly Limit'}</span>
+                </span>
+                <div class="text-[11px] font-mono text-purple-400 countdown-weekly font-bold" data-pool="${pool.id}">
+                  ${pool.time_until_reset_weekly ? `⏳ ${pool.time_until_reset_weekly}` : '—'}
+                </div>
+              </div>
+
+              <div class="flex justify-between items-baseline text-xs">
+                <div class="font-medium text-slate-200">
+                  <span class="font-bold text-sm ${colorW.textClass}">${usedW}%</span> ${currentLang === 'pt-BR' ? 'usado' : 'used'}
+                  <span class="text-slate-400 font-normal">(${remW}% ${currentLang === 'pt-BR' ? 'disponível' : 'available'})</span>
+                </div>
+              </div>
+
+              <!-- Trilha com Preenchimento Dinâmico Semanal -->
+              <div class="w-full bg-zinc-800/90 rounded-full h-3.5 p-0.5 overflow-hidden border border-zinc-700/60 shadow-inner">
+                <div class="${colorW.barClass} h-full rounded-full transition-all duration-700 ease-out" style="width: ${usedW}%;"></div>
+              </div>
+            </div>
+
+            <!-- CICLO DE FATURAMENTO MENSAL DA ASSINATURA -->
+            <div class="bg-slate-900/60 p-3 rounded-xl border border-dark-border/50 flex items-center justify-between text-xs">
+              <div class="flex items-center gap-2.5">
+                <div class="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400">
+                  💳
+                </div>
+                <div>
+                  <div class="text-xs font-semibold text-slate-200">${currentLang === 'pt-BR' ? 'Ciclo Mensal de Faturamento' : 'Monthly Billing Cycle'}</div>
+                  <div class="text-[10px] text-slate-400">${currentLang === 'pt-BR' ? 'Renovação da assinatura Google AI Pro em' : 'Subscription renewal on'} <span class="font-mono text-slate-200 font-medium">${pool.monthly_reset_date || '01/11/2026'}</span></div>
+                </div>
+              </div>
+              <div class="text-right">
+                <span class="text-xs font-bold font-mono text-emerald-400">${pool.days_until_monthly_reset} ${currentLang === 'pt-BR' ? 'dias' : 'days'}</span>
+                <div class="text-[10px] text-slate-500">${currentLang === 'pt-BR' ? 'para renovação' : 'to renewal'}</div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Modelos Rápidos para Copiar ID -->
+          <div class="mt-5 pt-3 border-t border-dark-border/60">
+            <div class="text-[11px] text-slate-400 mb-2 font-medium">${currentLang === 'pt-BR' ? 'Modelos recomendados no Hermes:' : 'Recommended models for Hermes:'}</div>
+            <div class="flex flex-wrap gap-2">
+              ${(pool.models || []).map(m => `
+                <button onclick="navigator.clipboard.writeText('${m.id}'); this.innerText='✓ Copiado!'; setTimeout(() => this.innerText='${m.id}', 1800)" title="${m.desc}" class="text-[11px] font-mono bg-slate-800/80 hover:bg-slate-700 text-sky-300 hover:text-white px-2.5 py-1 rounded-lg border border-slate-700 transition flex items-center gap-1">
+                  <span>${m.id}</span>
+                  <span class="text-[9px] text-slate-400">📋</span>
+                </button>
+              `).join('')}
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // Decremento suave dos contadores regressivos (5h e Semanal) a cada segundo
+    function tickCountdowns() {
+      if (!quotaPoolsData || quotaPoolsData.length === 0) return;
+
+      quotaPoolsData.forEach(p => {
+        // Janela de 5 Horas
+        if (p.seconds_until_reset_5h !== undefined && p.seconds_until_reset_5h > 0) {
+          p.seconds_until_reset_5h -= 1;
+          const formatted = formatSecondsDelta(p.seconds_until_reset_5h);
+          const el = document.querySelector(`.countdown-5h[data-pool="${p.id}"]`);
+          if (el) el.innerText = `⏳ ${formatted}`;
+        }
+
+        // Cota Semanal
+        if (p.seconds_until_reset_weekly !== undefined && p.seconds_until_reset_weekly > 0) {
+          p.seconds_until_reset_weekly -= 1;
+          const formattedW = formatSecondsDelta(p.seconds_until_reset_weekly);
+          const elW = document.querySelector(`.countdown-weekly[data-pool="${p.id}"]`);
+          if (elW) elW.innerText = `⏳ ${formattedW}`;
+        }
+      });
+    }
+
+    // Renderizar Catálogo de Modelos na Aba 2
+    function renderModelsCatalog() {
+      const container = document.getElementById('models-container');
+      container.innerHTML = '';
+
+      MODELS_CATALOG.forEach(m => {
+        const card = document.createElement('div');
+        card.className = 'glass p-5 rounded-2xl flex flex-col justify-between hover:border-slate-600 transition';
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold text-sky-400 font-mono">${m.id}</span>
+              <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">${m.provider}</span>
+            </div>
+            <h3 class="text-sm font-bold text-white mb-1">${m.name}</h3>
+            <p class="text-xs text-slate-400 leading-relaxed mb-4">${m.desc}</p>
+          </div>
+          <div class="flex items-center justify-between pt-3 border-t border-dark-border">
+            <div class="flex gap-1.5 flex-wrap">
+              ${m.tags.map(t => `<span class="text-[10px] bg-sky-500/10 text-sky-300 px-2 py-0.5 rounded-full font-medium border border-sky-500/20">${t}</span>`).join('')}
+            </div>
+            <button onclick="navigator.clipboard.writeText('${m.id}'); this.innerText='✓ Copiado!'; setTimeout(() => this.innerText='Copiar', 2000)" class="text-xs font-semibold px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition">
+              Copiar
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+
+    // Configurações
+    async function saveSettings() {
+      const lang = document.getElementById('cfg-language').value;
+      const host = document.getElementById('cfg-host').value;
+      const port = document.getElementById('cfg-port').value;
+
+      try {
+        const res = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ language: lang, host, port })
+        });
+        if (res.ok) {
+          const status = document.getElementById('save-status');
+          status.classList.remove('hidden');
+          setTimeout(() => status.classList.add('hidden'), 3000);
+          updateLanguageUI(lang);
+        }
+      } catch (e) {
+        alert('Erro ao salvar configurações: ' + e.message);
+      }
+    }
+
+    async function changeLanguage(lang) {
+      currentLang = lang;
+      document.getElementById('cfg-language').value = lang;
+      updateLanguageUI(lang);
+      await fetch('/api/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ language: lang })
+      });
+    }
+
+    function updateLanguageUI(lang) {
+      const btnPt = document.getElementById('btn-lang-pt');
+      const btnEn = document.getElementById('btn-lang-en');
+
+      if (lang === 'pt-BR') {
+        btnPt.className = 'px-2.5 py-1 rounded-md bg-sky-500 text-white font-bold transition-all';
+        btnEn.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-all';
+        
+        document.getElementById('tab-txt-dashboard').innerText = 'Painel & Cotas';
+        document.getElementById('tab-txt-models').innerText = 'Catálogo de Modelos';
+        document.getElementById('tab-txt-guide').innerText = 'Guia de Conexão';
+        document.getElementById('tab-txt-settings').innerText = 'Configurações';
+        document.getElementById('quota-headline').innerText = 'Consumo de Cota em Tempo Real (Pools Aglutinados)';
+        document.getElementById('quota-desc').innerText = 'Os modelos Gemini e Claude compartilham buckets de cota dedicados do seu plano Google AI Pro.';
+
+        document.getElementById('dd-title').innerText = 'Contas Conectadas';
+        document.getElementById('dd-desc').innerText = 'Apenas 1 conta ativa por vez é usada para o proxy';
+        document.getElementById('dd-btn-add').innerText = '+ Adicionar Conta Google';
+        document.getElementById('dd-btn-signout').innerText = 'Sair da Conta Ativa';
+        document.getElementById('txt-server-state-label').innerText = 'Estado do Servidor Proxy:';
+        document.getElementById('txt-auto-refresh-note').innerText = 'As cotas são atualizadas automaticamente a cada 1 minuto (janela de 5h minuto a minuto, semanal dia a dia).';
+        const s1 = document.getElementById('txt-sync-btn-1');
+        if (s1) s1.innerText = '⚡ Sincronizar com Hermes Agent';
+        const s2 = document.getElementById('txt-sync-btn-2');
+        if (s2) s2.innerText = 'Exportar Modelos (1 Clique)';
+
+        // Chaves de API
+        const kt = document.getElementById('txt-keys-title');
+        if (kt) kt.innerText = 'Gerenciamento de Chaves de API (Opcional)';
+        const kb = document.getElementById('txt-keys-optional-badge');
+        if (kb) kb.innerText = 'Opcional';
+        const kd = document.getElementById('txt-keys-desc');
+        if (kd) kd.innerText = 'O uso de chaves é opcional. Se nenhuma chave for cadastrada, o proxy aceita qualquer valor ou requisições em branco. Havendo chaves cadastradas, apenas clientes com uma chave válida terão acesso.';
+        const kbtn = document.getElementById('btn-txt-create-key');
+        if (kbtn) kbtn.innerText = 'Gerar Chave';
+        const mt = document.getElementById('modal-key-title');
+        if (mt) mt.innerText = 'Nova Chave de API Gerada';
+        const ms = document.getElementById('modal-key-subtitle');
+        if (ms) ms.innerText = 'Copie sua chave agora para conectar o Hermes ou outros clientes:';
+        const mn = document.getElementById('modal-key-note');
+        if (mn) mn.innerText = 'A chave pode ser visualizada, copiada ou excluída a qualquer momento na lista de chaves.';
+        const mc = document.getElementById('btn-modal-copy');
+        if (mc) mc.innerText = 'Copiar';
+      } else {
+        btnEn.className = 'px-2.5 py-1 rounded-md bg-sky-500 text-white font-bold transition-all';
+        btnPt.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-slate-200 transition-all';
+        
+        document.getElementById('tab-txt-dashboard').innerText = 'Dashboard & Quotas';
+        document.getElementById('tab-txt-models').innerText = 'Model Catalog';
+        document.getElementById('tab-txt-guide').innerText = 'Agent Guide';
+        document.getElementById('tab-txt-settings').innerText = 'Settings';
+        document.getElementById('quota-headline').innerText = 'Real-time Quota Consumption (Unified Pools)';
+        document.getElementById('quota-desc').innerText = 'Gemini and Claude models share dedicated quota buckets from your Google AI Pro tier.';
+
+        document.getElementById('dd-title').innerText = 'Connected Accounts';
+        document.getElementById('dd-desc').innerText = 'Only 1 active account at a time is used for the proxy';
+        document.getElementById('dd-btn-add').innerText = '+ Add Google Account';
+        document.getElementById('dd-btn-signout').innerText = 'Sign Out Active Account';
+        document.getElementById('txt-server-state-label').innerText = 'Proxy Server State:';
+        document.getElementById('txt-auto-refresh-note').innerText = 'Quotas update automatically every 1 minute (5-hour window minute-by-minute, weekly day-by-day).';
+        const s1 = document.getElementById('txt-sync-btn-1');
+        if (s1) s1.innerText = '⚡ Sync with Hermes Agent';
+        const s2 = document.getElementById('txt-sync-btn-2');
+        if (s2) s2.innerText = 'Export Models (1 Click)';
+
+        // Chaves de API
+        const kt = document.getElementById('txt-keys-title');
+        if (kt) kt.innerText = 'API Key Management (Optional)';
+        const kb = document.getElementById('txt-keys-optional-badge');
+        if (kb) kb.innerText = 'Optional';
+        const kd = document.getElementById('txt-keys-desc');
+        if (kd) kd.innerText = 'API key usage is optional. When no keys are configured, the proxy allows open access (accepts blank or any value). Once keys are added, only requests with a valid key are accepted.';
+        const kbtn = document.getElementById('btn-txt-create-key');
+        if (kbtn) kbtn.innerText = 'Generate Key';
+        const mt = document.getElementById('modal-key-title');
+        if (mt) mt.innerText = 'New API Key Generated';
+        const ms = document.getElementById('modal-key-subtitle');
+        if (ms) ms.innerText = 'Copy your key now to connect Hermes or other clients:';
+        const mn = document.getElementById('modal-key-note');
+        if (mn) mn.innerText = 'The key can be viewed, copied, or deleted at any time in the key list.';
+        const mc = document.getElementById('btn-modal-copy');
+        if (mc) mc.innerText = 'Copy';
+      }
+      updateServerUI();
+      if (quotaPoolsData && quotaPoolsData.length > 0) {
+        renderPools(quotaPoolsData);
+      }
+      renderApiKeys();
+    }
+
+    async function syncHermes() {
+      const btn1 = document.getElementById('btn-sync-hermes-models');
+      const btn2 = document.getElementById('btn-sync-hermes-guide');
+      const orig1 = btn1 ? btn1.innerHTML : '';
+      const orig2 = btn2 ? btn2.innerHTML : '';
+      
+      const loading = currentLang === 'pt-BR' ? '⏳ Sincronizando...' : '⏳ Syncing...';
+      if (btn1) btn1.innerHTML = loading;
+      if (btn2) btn2.innerHTML = loading;
+
+      try {
+        const res = await fetch('/api/hermes/sync', { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+          const successMsg = currentLang === 'pt-BR' 
+            ? `✓ Sucesso! ${data.models_count} modelos exportados para o Hermes Agent!\nConfigurado em ~/.hermes/config.yaml e cache atualizado.`
+            : `✓ Success! ${data.models_count} models exported to Hermes Agent!\nConfigured in ~/.hermes/config.yaml and cache updated.`;
+          alert(successMsg);
+        } else {
+          alert('Erro ao sincronizar com o Hermes: ' + (data.error || 'Erro desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro de conexão ao sincronizar: ' + e.message);
+      } finally {
+        if (btn1) btn1.innerHTML = orig1;
+        if (btn2) btn2.innerHTML = orig2;
+      }
+    }
+
+    // ==========================================
+    // 5. GERENCIAMENTO DE CHAVES DE API (OPCIONAL)
+    // ==========================================
+    async function loadApiKeys() {
+      try {
+        const res = await fetch('/api/keys?t=' + Date.now(), { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          apiKeysData = data.keys || [];
+          renderApiKeys();
+        }
+      } catch (e) {
+        console.error('Erro ao listar chaves de API:', e);
+      }
+    }
+
+    function maskKey(raw) {
+      if (!raw || raw.length <= 7) return raw || '••••••••';
+      const start = raw.slice(0, 3);
+      const end = raw.slice(-4);
+      return `${start}••••••••••••••••••••${end}`;
+    }
+
+    function toggleRevealKey(id) {
+      if (revealedKeys.has(id)) {
+        revealedKeys.delete(id);
+      } else {
+        revealedKeys.add(id);
+      }
+      renderApiKeys();
+    }
+
+    function renderApiKeys() {
+      const container = document.getElementById('api-keys-list-container');
+      const statusDiv = document.getElementById('keys-auth-status');
+      if (!container || !statusDiv) return;
+
+      container.innerHTML = '';
+
+      if (apiKeysData.length === 0) {
+        // Estado: Acesso livre (chaves opcionais)
+        statusDiv.className = 'text-xs p-3 rounded-xl border flex items-center gap-2.5 bg-emerald-500/10 border-emerald-500/20 text-emerald-400';
+        statusDiv.innerHTML = `
+          <div class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shrink-0"></div>
+          <div>
+            <div class="font-bold">${currentLang === 'pt-BR' ? 'Acesso Livre (Sem Chave Exigida)' : 'Open Access (No Key Required)'}</div>
+            <div class="text-[11px] text-slate-400 mt-0.5">${currentLang === 'pt-BR' ? 'O proxy aceita requisições livres com qualquer chave ou em branco.' : 'The proxy accepts requests with any key or blank authorization.'}</div>
+          </div>
+        `;
+
+        container.innerHTML = `
+          <div class="p-5 rounded-xl bg-slate-900/40 border border-dashed border-slate-700/70 text-center text-xs text-slate-400">
+            ${currentLang === 'pt-BR' 
+              ? 'Nenhuma chave configurada. O proxy está com acesso livre e opcional. Clique em "+ Gerar Chave" se desejar restringir o acesso.' 
+              : 'No keys configured. The proxy is open and optional. Click "+ Generate Key" if you wish to enforce authentication.'}
+          </div>
+        `;
+        return;
+      }
+
+      // Estado: Autenticação ativa
+      statusDiv.className = 'text-xs p-3 rounded-xl border flex items-center gap-2.5 bg-amber-500/10 border-amber-500/20 text-amber-300';
+      statusDiv.innerHTML = `
+        <div class="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0"></div>
+        <div>
+          <div class="font-bold">${currentLang === 'pt-BR' ? 'Autenticação Ativa Protegida' : 'Authentication Protected'}</div>
+          <div class="text-[11px] text-slate-400 mt-0.5">${currentLang === 'pt-BR' ? `Apenas clientes com uma das ${apiKeysData.length} chaves cadastradas terão acesso.` : `Only clients with one of the ${apiKeysData.length} configured keys have access.`}</div>
+        </div>
+      `;
+
+      apiKeysData.forEach(k => {
+        const isRevealed = revealedKeys.has(k.id);
+        const displayKey = isRevealed ? k.key : maskKey(k.key);
+
+        const item = document.createElement('div');
+        item.className = 'flex items-center justify-between p-3 bg-dark-card/60 hover:bg-slate-800/50 rounded-xl border border-dark-border/60 transition gap-3';
+        item.innerHTML = `
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-7 h-7 rounded-lg bg-sky-500/10 text-sky-400 flex items-center justify-center font-mono font-bold text-xs shrink-0">
+              🔑
+            </div>
+            <div class="min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-xs font-semibold text-white truncate">${k.name}</span>
+                <span class="text-[10px] text-slate-500 font-mono">${k.created_at}</span>
+              </div>
+              <div class="font-mono text-xs text-sky-300 mt-0.5 tracking-wide truncate select-all">
+                ${displayKey}
+              </div>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1 shrink-0">
+            <!-- Olho: revelar/velar -->
+            <button onclick="toggleRevealKey('${k.id}')" title="${isRevealed ? (currentLang === 'pt-BR' ? 'Ocultar' : 'Hide') : (currentLang === 'pt-BR' ? 'Mostrar completa' : 'Reveal')}" class="p-1.5 text-slate-400 hover:text-sky-300 hover:bg-slate-700/50 rounded-lg transition text-xs">
+              ${isRevealed ? '🙈' : '👁️'}
+            </button>
+            <!-- Copiar -->
+            <button onclick="copyApiKey('${k.key}', this)" title="${currentLang === 'pt-BR' ? 'Copiar chave completa' : 'Copy full key'}" class="p-1.5 text-slate-400 hover:text-emerald-300 hover:bg-slate-700/50 rounded-lg transition text-xs">
+              📋
+            </button>
+            <!-- Lixeira -->
+            <button onclick="deleteApiKey('${k.id}', '${k.name}')" title="${currentLang === 'pt-BR' ? 'Remover chave' : 'Remove key'}" class="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition text-xs">
+              🗑️
+            </button>
+          </div>
+        `;
+        container.appendChild(item);
+      });
+    }
+
+    async function promptCreateApiKey() {
+      const promptText = currentLang === 'pt-BR' 
+        ? 'Digite um nome ou identificador para a chave (opcional, ex: Hermes Agent):' 
+        : 'Enter a name or identifier for the key (optional, e.g. Hermes Agent):';
+      const name = prompt(promptText);
+      if (name === null) return;
+
+      try {
+        const res = await fetch('/api/keys', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name })
+        });
+        const data = await res.json();
+        if (data.success && data.key) {
+          openKeyModal(data.key.key);
+          await loadApiKeys();
+        } else {
+          alert('Erro ao criar chave: ' + (data.error || 'Erro desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro de conexão ao criar chave: ' + e.message);
+      }
+    }
+
+    async function deleteApiKey(id, name) {
+      const confirmMsg = currentLang === 'pt-BR'
+        ? `Deseja realmente remover a chave "${name}"?\nSe todas as chaves forem removidas, o proxy voltará automaticamente ao acesso livre/opcional.`
+        : `Do you really want to remove key "${name}"?\nIf all keys are removed, the proxy will return automatically to open/optional access.`;
+
+      if (!confirm(confirmMsg)) return;
+
+      try {
+        const res = await fetch('/api/keys/remove', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (data.success) {
+          revealedKeys.delete(id);
+          await loadApiKeys();
+        } else {
+          alert('Erro ao remover chave: ' + (data.error || 'Erro desconhecido'));
+        }
+      } catch (e) {
+        alert('Erro ao remover chave: ' + e.message);
+      }
+    }
+
+    function copyApiKey(key, btn) {
+      navigator.clipboard.writeText(key);
+      const orig = btn.innerText;
+      btn.innerText = '✓';
+      setTimeout(() => btn.innerText = orig, 1800);
+    }
+
+    function openKeyModal(key) {
+      const input = document.getElementById('modal-key-input');
+      const modal = document.getElementById('modal-key-generated');
+      if (input && modal) {
+        input.value = key;
+        modal.classList.remove('hidden');
+      }
+    }
+
+    function closeKeyModal() {
+      const modal = document.getElementById('modal-key-generated');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function copyModalKey(btn) {
+      const input = document.getElementById('modal-key-input');
+      if (input) {
+        navigator.clipboard.writeText(input.value);
+        if (btn) {
+          const orig = btn.innerText;
+          btn.innerText = '✓ Copiado!';
+          setTimeout(() => btn.innerText = orig, 1800);
+        }
+      }
+    }
+
+    function copyCode(btn) {
+      const code = btn.nextElementSibling.innerText;
+      navigator.clipboard.writeText(code);
+      btn.innerText = '✓ Copiado!';
+      setTimeout(() => btn.innerText = 'Copiar', 2000);
+    }
+  </script>
+</body>
+</html>
