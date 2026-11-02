@@ -35,9 +35,13 @@ FALLBACK_IDENTITY_SCRUB_RULES = [
 GEMINI_SKIP_SIGNATURE = "skip_thought_signature_validator"
 
 
+_BILLING_HEADER_RE = re.compile(r"^x-anthropic-billing-header:[^\n]*\n?", re.IGNORECASE | re.MULTILINE)
+
+
 def scrub_identity(text):
     """
-    Replaces third-party agent names that trigger Cloud Code filters (case-insensitive).
+    Replaces third-party agent names that trigger Cloud Code filters (case-insensitive)
+    and strips `x-anthropic-billing-header` pseudo-headers (matching `antigravity-claude-proxy`).
     Always pulls the latest rules from `antigravity-claude-proxy` via `acp_backend`.
     """
     if not isinstance(text, str):
@@ -48,7 +52,7 @@ def scrub_identity(text):
     except Exception:
         rules = FALLBACK_IDENTITY_SCRUB_RULES
 
-    result = text
+    result = _BILLING_HEADER_RE.sub("", text)
     for term, replacement in rules:
         if term:
             result = re.sub(re.escape(term), replacement, result, flags=re.IGNORECASE)
@@ -232,13 +236,13 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
         if role == "user":
             user_parts = []
             if isinstance(content, str):
-                user_parts.append({"text": content})
+                user_parts.append({"text": scrub_identity(content)})
             elif isinstance(content, list):
                 for item in content:
                     if not isinstance(item, dict):
                         continue
                     if item.get("type") == "text":
-                        user_parts.append({"text": item.get("text", "")})
+                        user_parts.append({"text": scrub_identity(item.get("text", ""))})
                     elif item.get("type") == "image_url":
                         url = item.get("image_url", {}).get("url", "")
                         if url.startswith("data:") and "," in url:
@@ -287,7 +291,10 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
             tool_content = msg.get("content", "")
 
             # Tool responses in Google Cloud Code must be structured functionResponse
-            resp_obj = {"result": tool_content} if isinstance(tool_content, str) else tool_content
+            if isinstance(tool_content, str):
+                resp_obj = {"result": scrub_identity(tool_content)}
+            else:
+                resp_obj = tool_content
             google_contents.append({
                 "role": "user",
                 "parts": [{
@@ -303,13 +310,15 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
 
     # Derive stable per-account sessionId using antigravity-claude-proxy's session-manager logic
     session_id = acp_backend.derive_session_id(account_email)
+    is_claude_model = "claude" in (model or "").lower()
+    max_output_cap = int(spec.get("geminiMaxOutputTokens", 65536))
 
     # Prepare Google request object
     google_request = {
         "contents": google_contents,
         "sessionId": session_id,
         "generationConfig": {
-            "maxOutputTokens": max_tokens,
+            "maxOutputTokens": min(max_tokens, max_output_cap),
             "temperature": temperature
         }
     }
@@ -323,24 +332,37 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
         scrub_fn=scrub_identity
     )
 
-    # Handle thinking configuration based on model and Hermes reasoning_effort
+    # Handle thinking configuration matching antigravity-claude-proxy/src/format/request-converter.js
     if effort == "none":
-        google_request["generationConfig"]["thinkingConfig"] = {
-            "includeThoughts": False
-        }
+        if is_claude_model:
+            google_request["generationConfig"]["thinkingConfig"] = {"include_thoughts": False}
+        else:
+            google_request["generationConfig"]["thinkingConfig"] = {"includeThoughts": False}
     elif is_thinking_model(model):
-        budget = 32768
+        budget = 32000 if is_claude_model else 32768
         if effort in ("low", "minimal"):
             budget = 2048
         elif effort == "medium":
             budget = 8192
         elif effort in ("high", "xhigh", "max", "ultra"):
-            budget = 32768
+            budget = 32000 if is_claude_model else 32768
 
-        google_request["generationConfig"]["thinkingConfig"] = {
-            "includeThoughts": True,
-            "thinkingBudget": budget
-        }
+        current_max = google_request["generationConfig"]["maxOutputTokens"]
+        if current_max <= budget:
+            google_request["generationConfig"]["maxOutputTokens"] = min(
+                budget + max(current_max, 8192), max_output_cap
+            )
+
+        if is_claude_model:
+            google_request["generationConfig"]["thinkingConfig"] = {
+                "include_thoughts": True,
+                "thinking_budget": budget
+            }
+        else:
+            google_request["generationConfig"]["thinkingConfig"] = {
+                "includeThoughts": True,
+                "thinkingBudget": budget
+            }
 
     # Handle Tools / Function Calling (with anti-bot scrubbing on descriptions)
     if tools and isinstance(tools, list):
@@ -363,6 +385,12 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
             google_request["tools"] = [{
                 "functionDeclarations": function_declarations
             }]
+            if is_claude_model:
+                google_request["toolConfig"] = {
+                    "functionCallingConfig": {
+                        "mode": "VALIDATED"
+                    }
+                }
 
     # Build the outer envelope matching antigravity-claude-proxy's buildCloudCodeRequest
     req_prefix = envelope_spec.get("requestIdPrefix", "agent-")

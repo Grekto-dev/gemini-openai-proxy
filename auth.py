@@ -193,11 +193,14 @@ def get_subscription_and_project(access_token):
         "https://daily-cloudcode-pa.googleapis.com",
     ]
     base_headers = dict(spec.get("loadCodeAssistHeaders") or spec.get("antigravityHeaders") or {})
+    session_id = acp_backend.derive_session_id(get_active_email())
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
         **base_headers,
     }
+    if session_id:
+        headers["X-Machine-Session-Id"] = session_id
     metadata = spec.get("clientMetadata") or {"ideType": 9, "platform": 3, "pluginType": 2}
     payload = {"metadata": metadata, "mode": 1}
 
@@ -286,7 +289,8 @@ def fetch_available_models_raw(access_token, project_id=None):
         "https://daily-cloudcode-pa.googleapis.com",
         "https://cloudcode-pa.googleapis.com",
     ]
-    headers = acp_backend.build_antigravity_headers(access_token)
+    session_id = acp_backend.derive_session_id(get_active_email())
+    headers = acp_backend.build_antigravity_headers(access_token, session_id=session_id)
     body = {"project": project_id} if project_id else {}
 
     for endpoint in endpoints:
@@ -370,7 +374,8 @@ def get_quota_details():
     # 3. Also fetch retrieveUserQuotaSummary for 5h vs weekly window granularity if available
     summary_groups = {}
     try:
-        headers = acp_backend.build_antigravity_headers(access_token)
+        session_id = acp_backend.derive_session_id(get_active_email())
+        headers = acp_backend.build_antigravity_headers(access_token, session_id=session_id)
         spec = acp_backend.get_backend_spec()
         ep = (spec.get("endpointFallbacks") or ["https://daily-cloudcode-pa.googleapis.com"])[0]
         s_resp = requests.post(
