@@ -222,24 +222,27 @@ def run_self_diagnostics() -> dict:
     checks = []
     overall_ok = True
 
-    # 1. Check antigravity-claude-proxy backend bridge
+    # 1. Check antigravity-claude-proxy backend bridge & Local Antigravity Sync
     t0 = time.time()
     try:
         import acp_backend
-        st = acp_backend.get_backend_status_summary()
+        sync_res = acp_backend.verify_and_sync_local_antigravity()
+        st = sync_res.get("backend") or {}
+        loc = sync_res.get("local_antigravity") or {}
         ok = bool(st.get("connected") and st.get("user_agent", "").startswith("antigravity/hub/"))
+        loc_str = f"Local v{loc.get('ide_version')} (CL {loc.get('language_server_cl')})" if loc.get("installed") else "Fallback ACP"
         checks.append({
-            "name": "Ponte Backend (antigravity-claude-proxy)",
+            "name": "Ponte Backend & Antigravity Local",
             "ok": ok,
             "latency_ms": int((time.time() - t0) * 1000),
-            "detail": f"Modo: {st.get('extraction_mode')} | UA: {st.get('user_agent')} | X-Client: {st.get('client_version')}"
+            "detail": f"Sincronia: {loc_str} | UA: {st.get('user_agent')} | X-Client: {st.get('client_version')}"
         })
         if not ok:
             overall_ok = False
     except Exception as e:
         overall_ok = False
         checks.append({
-            "name": "Ponte Backend (antigravity-claude-proxy)",
+            "name": "Ponte Backend & Antigravity Local",
             "ok": False,
             "latency_ms": int((time.time() - t0) * 1000),
             "detail": str(e)

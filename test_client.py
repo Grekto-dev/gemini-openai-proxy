@@ -24,14 +24,23 @@ BASE_URL = "http://127.0.0.1:8000"
 
 
 def test_backend_status():
-    print("--- 1. Testing Backend Bridge (GET /api/backend/status) ---")
+    print("--- 1. Testing Backend Bridge & Local Antigravity Sync (/api/backend/status & /api/backend/verify-local) ---")
     resp = requests.get(f"{BASE_URL}/api/backend/status", timeout=10)
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
     data = resp.json()
     assert data.get("connected") is True, f"Backend not connected: {data}"
     ua = data.get("user_agent", "")
     assert "antigravity/hub/" in ua, f"Expected antigravity/hub User-Agent, got {ua}"
-    print(f"✅ Success! Mode: {data.get('extraction_mode')} | UA: {ua} | X-Client: {data.get('client_version')}")
+
+    v_resp = requests.post(f"{BASE_URL}/api/backend/verify-local", timeout=10)
+    assert v_resp.status_code == 200, f"Expected 200 from verify-local, got {v_resp.status_code}"
+    v_data = v_resp.json()
+    assert v_data.get("success") is True
+    loc = v_data.get("local_antigravity") or {}
+    print(
+        f"✅ Success! Mode: {data.get('extraction_mode')} | UA: {ua} | "
+        f"Local Sync: {v_data.get('synced_with_local')} (v{loc.get('ide_version')} • CL {loc.get('language_server_cl')})"
+    )
 
 
 def test_anti_bot_and_redaction():

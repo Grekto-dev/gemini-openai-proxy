@@ -619,6 +619,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode("utf-8"))
             return
 
+        # 9b-2. Verify & Sync Local Antigravity Installation Identifiers
+        if self.path == "/api/backend/verify-local":
+            res = acp_backend.verify_and_sync_local_antigravity()
+            local_ag = res.get("local_antigravity") or {}
+            logger.record_log(
+                "INFO" if res.get("synced_with_local") else "WARN",
+                "BACKEND",
+                f"Verificação do Antigravity local: {res.get('reason')} | UA Ativo: {res.get('active_user_agent')} | CL: {local_ag.get('language_server_cl', 'N/A')}",
+                details=res
+            )
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode("utf-8"))
+            return
+
         # 9c. Clear Logs API
         if self.path == "/api/logs/clear":
             res = logger.clear_logs()
@@ -1112,12 +1129,27 @@ def run_server():
     log_terminal("server_started", host=host, port=port)
     logger.record_log("INFO", "PROXY", f"Modo de execução: {mode_str} (PID: {os.getpid()})")
 
-    st_backend = acp_backend.get_backend_status_summary()
+    st_backend = acp_backend.verify_and_sync_local_antigravity()
+    b_summary = st_backend.get("backend") or {}
+    local_ag = st_backend.get("local_antigravity") or {}
     logger.record_log(
         "INFO",
         "BACKEND",
-        f"Backend antigravity-claude-proxy v{st_backend.get('package_version')} ativo | UA: {st_backend.get('user_agent')}"
+        f"Backend antigravity-claude-proxy v{b_summary.get('package_version')} ativo | UA: {b_summary.get('user_agent')}"
     )
+    if local_ag.get("installed"):
+        logger.record_log(
+            "INFO",
+            "BACKEND",
+            f"Antigravity Local detectado e sincronizado: v{local_ag.get('ide_version')} ({local_ag.get('source')}) | LS CL: {local_ag.get('language_server_cl', 'N/A')} | agy CLI: v{local_ag.get('agy_cli_version', 'N/A')}",
+            details=st_backend.get("identifier_sync")
+        )
+    else:
+        logger.record_log(
+            "WARN",
+            "BACKEND",
+            f"Antigravity local não encontrado em disco; usando máscara fallback do antigravity-claude-proxy ({b_summary.get('user_agent')})"
+        )
 
     auth_status = auth.get_auth_status()
     if auth_status.get("authenticated"):

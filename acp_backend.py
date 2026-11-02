@@ -24,6 +24,7 @@ import json
 import time
 import uuid
 import glob
+import struct
 import platform
 import subprocess
 import requests
@@ -91,17 +92,24 @@ def find_node_binary():
 
 
 def _get_repo_mtime(acp_path):
-    """Returns the highest modification timestamp among key files in antigravity-claude-proxy."""
-    if not acp_path:
-        return 0
+    """Returns the highest modification timestamp among key files in antigravity-claude-proxy and local Antigravity."""
     tracked_files = [
-        os.path.join(acp_path, "package.json"),
-        os.path.join(acp_path, "src", "constants.js"),
-        os.path.join(acp_path, "src", "utils", "version-detector.js"),
-        os.path.join(acp_path, "src", "cloudcode", "request-builder.js"),
-        os.path.join(acp_path, "src", "cloudcode", "model-api.js"),
-        os.path.join(acp_path, "src", "cloudcode", "session-manager.js"),
+        "/opt/Antigravity/resources/app.asar",
+        "/opt/antigravity/resources/app.asar",
+        "/usr/share/antigravity/resources/app.asar",
+        "/opt/Antigravity/resources/bin/language_server",
+        "/opt/Antigravity/resources/app/product.json",
+        "/usr/share/antigravity/resources/app/product.json",
     ]
+    if acp_path:
+        tracked_files.extend([
+            os.path.join(acp_path, "package.json"),
+            os.path.join(acp_path, "src", "constants.js"),
+            os.path.join(acp_path, "src", "utils", "version-detector.js"),
+            os.path.join(acp_path, "src", "cloudcode", "request-builder.js"),
+            os.path.join(acp_path, "src", "cloudcode", "model-api.js"),
+            os.path.join(acp_path, "src", "cloudcode", "session-manager.js"),
+        ])
     max_mtime = 0
     for fpath in tracked_files:
         try:
@@ -110,6 +118,213 @@ def _get_repo_mtime(acp_path):
         except Exception:
             pass
     return max_mtime
+
+
+def _is_version_higher(v1, v2):
+    """Compares two semver strings (X.Y.Z). Returns True if v1 > v2."""
+    try:
+        p1 = [int(x) for x in re.findall(r"\d+", str(v1 or ""))]
+        p2 = [int(x) for x in re.findall(r"\d+", str(v2 or ""))]
+        for i in range(max(len(p1), len(p2))):
+            a = p1[i] if i < len(p1) else 0
+            b = p2[i] if i < len(p2) else 0
+            if a > b:
+                return True
+            if a < b:
+                return False
+    except Exception:
+        pass
+    return False
+
+
+def _read_asar_file(asar_path, file_parts):
+    """Reads a specific file from an Electron ASAR archive in pure Python without external dependencies."""
+    with open(asar_path, "rb") as f:
+        header_bytes = f.read(16)
+        if len(header_bytes) < 16:
+            return None
+        _, h_size, _, str_size = struct.unpack("<IIII", header_bytes)
+        header_json = f.read(str_size).decode("utf-8", errors="ignore")
+        header = json.loads(header_json)
+        base_offset = 8 + h_size
+
+        node = header
+        for part in file_parts:
+            files_map = node.get("files")
+            if not isinstance(files_map, dict) or part not in files_map:
+                return None
+            node = files_map[part]
+
+        if "offset" not in node or "size" not in node:
+            return None
+        f.seek(base_offset + int(node["offset"]))
+        return f.read(int(node["size"])).decode("utf-8", errors="ignore")
+
+
+def inspect_local_antigravity_installation():
+    """
+    Inspects the host machine's locally installed Antigravity application to extract
+    its real version, User-Agent format, IDE flags, Language Server changelist, and CLI version.
+
+    Supports both:
+    - Antigravity 2.x Hub packaged in Electron ASAR (`/opt/Antigravity/resources/app.asar`)
+    - Unpacked `product.json` / `package.json` installations
+    - Local `language_server` (`--stamp`) and `agy` CLI (`--version`)
+    """
+    sys_os = platform.system().lower()
+    os_name = "darwin" if sys_os == "darwin" else ("win32" if sys_os == "windows" else "linux")
+    arch_raw = platform.machine().lower()
+    arch_name = "arm64" if arch_raw in ("aarch64", "arm64") else "x64"
+
+    info = {
+        "installed": False,
+        "source": None,
+        "source_type": None,
+        "ide_version": None,
+        "product_client_version": None,
+        "ide_name": "antigravity",
+        "subclient_type": "hub",
+        "user_agent_name": "antigravity",
+        "computed_user_agent": None,
+        "cloud_code_endpoint": None,
+        "language_server_path": None,
+        "language_server_cl": None,
+        "language_server_built_on": None,
+        "agy_cli_path": None,
+        "agy_cli_version": None,
+        "os_arch": f"{os_name}/{arch_name}",
+        "checked_at": int(time.time()),
+    }
+
+    # 1. Check ASAR archives (Antigravity 2.x Hub on Linux/macOS/Windows)
+    asar_candidates = [
+        "/opt/Antigravity/resources/app.asar",
+        "/opt/antigravity/resources/app.asar",
+        "/usr/share/antigravity/resources/app.asar",
+        os.path.expanduser("~/.local/share/antigravity/resources/app.asar"),
+        "/snap/antigravity/current/resources/app.asar",
+        "/Applications/Antigravity.app/Contents/Resources/app.asar",
+        os.path.expanduser("~/Applications/Antigravity.app/Contents/Resources/app.asar"),
+    ]
+    for asar_path in asar_candidates:
+        if os.path.isfile(asar_path):
+            try:
+                pkg_raw = _read_asar_file(asar_path, ["package.json"])
+                if pkg_raw:
+                    pkg_data = json.loads(pkg_raw)
+                    ver = pkg_data.get("ideVersion") or pkg_data.get("version")
+                    if ver:
+                        info["installed"] = True
+                        info["source"] = asar_path
+                        info["source_type"] = "app.asar"
+                        info["ide_version"] = str(ver).strip()
+
+                prod_raw = _read_asar_file(asar_path, ["product.json"])
+                if prod_raw:
+                    prod_data = json.loads(prod_raw)
+                    if prod_data.get("ideVersion"):
+                        info["ide_version"] = str(prod_data["ideVersion"]).strip()
+                    if prod_data.get("version"):
+                        info["product_client_version"] = str(prod_data["version"]).strip()
+
+                ls_js = _read_asar_file(asar_path, ["dist", "languageServer.js"])
+                if ls_js:
+                    m_ide = re.search(r"['\"]--override_ide_name['\"]\s*,\s*['\"]([^'\"]+)['\"]", ls_js)
+                    if m_ide:
+                        info["ide_name"] = m_ide.group(1)
+                    m_sub = re.search(r"['\"]--subclient_type['\"]\s*,\s*['\"]([^'\"]+)['\"]", ls_js)
+                    if m_sub:
+                        info["subclient_type"] = m_sub.group(1)
+                    m_ua = re.search(r"['\"]--override_user_agent_name['\"]\s*,\s*['\"]([^'\"]+)['\"]", ls_js)
+                    if m_ua:
+                        info["user_agent_name"] = m_ua.group(1)
+                    m_ep = re.search(r"['\"]--cloud_code_endpoint['\"]\s*,\s*['\"]([^'\"]+)['\"]", ls_js)
+                    if m_ep:
+                        info["cloud_code_endpoint"] = m_ep.group(1)
+                if info["installed"]:
+                    break
+            except Exception:
+                pass
+
+    # 2. Check unpacked product.json if ASAR wasn't found or to supplement product_client_version
+    product_candidates = [
+        "/opt/Antigravity/resources/app/product.json",
+        "/opt/antigravity/resources/app/product.json",
+        "/usr/share/antigravity/resources/app/product.json",
+        os.path.expanduser("~/.local/share/antigravity/resources/app/product.json"),
+        "/snap/antigravity/current/resources/app/product.json",
+        "/Applications/Antigravity.app/Contents/Resources/app/product.json",
+    ]
+    for prod_path in product_candidates:
+        if os.path.isfile(prod_path):
+            try:
+                with open(prod_path, "r", encoding="utf-8") as pf:
+                    pdata = json.load(pf)
+                if pdata.get("ideVersion") and not info["ide_version"]:
+                    info["ide_version"] = str(pdata["ideVersion"]).strip()
+                    info["installed"] = True
+                    info["source"] = prod_path
+                    info["source_type"] = "product.json"
+                if pdata.get("version") and not info["product_client_version"]:
+                    info["product_client_version"] = str(pdata["version"]).strip()
+                    if not info["installed"]:
+                        info["installed"] = True
+                        info["source"] = prod_path
+                        info["source_type"] = "product.json"
+                break
+            except Exception:
+                pass
+
+    # 3. Check local Language Server binary (--stamp)
+    ls_candidates = [
+        "/opt/Antigravity/resources/bin/language_server",
+        "/opt/antigravity/resources/bin/language_server",
+        "/usr/share/antigravity/resources/bin/language_server",
+        os.path.expanduser("~/.local/share/antigravity/resources/bin/language_server"),
+    ]
+    for ls_bin in ls_candidates:
+        if os.path.isfile(ls_bin) and os.access(ls_bin, os.X_OK):
+            info["language_server_path"] = ls_bin
+            try:
+                res = subprocess.run([ls_bin, "--stamp"], capture_output=True, text=True, timeout=2)
+                if res.returncode == 0 and res.stdout:
+                    m_cl = re.search(r"Built at CL:\s*(\d+)", res.stdout)
+                    if m_cl:
+                        info["language_server_cl"] = m_cl.group(1)
+                    m_on = re.search(r"Built on:\s*([^\n]+)", res.stdout)
+                    if m_on:
+                        info["language_server_built_on"] = m_on.group(1).strip()
+            except Exception:
+                pass
+            break
+
+    # 4. Check local `agy` CLI
+    agy_candidates = [
+        os.path.expanduser("~/.local/bin/agy"),
+        "/usr/local/bin/agy",
+        "/usr/bin/agy",
+    ]
+    for agy_bin in agy_candidates:
+        if os.path.isfile(agy_bin) and os.access(agy_bin, os.X_OK):
+            info["agy_cli_path"] = agy_bin
+            try:
+                res = subprocess.run([agy_bin, "--version"], capture_output=True, text=True, timeout=2)
+                if res.returncode == 0 and res.stdout.strip():
+                    info["agy_cli_version"] = res.stdout.strip().splitlines()[-1].strip()
+            except Exception:
+                pass
+            break
+
+    # 5. Compute exact User-Agent matching the installed Antigravity binary
+    if info["ide_version"]:
+        ua_prefix = info["user_agent_name"] or "antigravity"
+        sub = info["subclient_type"]
+        if sub:
+            info["computed_user_agent"] = f"{ua_prefix}/{sub}/{info['ide_version']} {os_name}/{arch_name}"
+        else:
+            info["computed_user_agent"] = f"{ua_prefix}/{info['ide_version']} {os_name}/{arch_name}"
+
+    return info
 
 
 def _get_git_info(acp_path):
@@ -429,6 +644,65 @@ def get_backend_spec(force_reload=False):
     spec["extractionMode"] = mode
     spec["loadedAt"] = int(time.time())
 
+    # Inspect locally installed Antigravity binary/ASAR and synchronize identifiers
+    local_ag = inspect_local_antigravity_installation()
+    acp_default_ua = (spec.get("antigravityHeaders") or {}).get("User-Agent", "")
+    acp_default_cver = (spec.get("antigravityHeaders") or {}).get("X-Client-Version", "1.110.0")
+
+    # Read MIN_DETECTED_USER_AGENT_VERSION from antigravity-claude-proxy/src/utils/version-detector.js
+    min_supported_ua_ver = "2.0.3"
+    if acp_path:
+        vd_file = os.path.join(acp_path, "src", "utils", "version-detector.js")
+        if os.path.isfile(vd_file):
+            try:
+                with open(vd_file, "r", encoding="utf-8") as vf:
+                    m_min = re.search(r"MIN_DETECTED_USER_AGENT_VERSION\s*=\s*['\"]([^'\"]+)['\"]", vf.read())
+                    if m_min:
+                        min_supported_ua_ver = m_min.group(1)
+            except Exception:
+                pass
+
+    synced_with_local = False
+    sync_reason = "Usando fallback do antigravity-claude-proxy (Antigravity local não encontrado)"
+
+    if local_ag.get("installed") and local_ag.get("ide_version"):
+        local_ver = local_ag["ide_version"]
+        if _is_version_higher(local_ver, min_supported_ua_ver) or local_ver == min_supported_ua_ver:
+            computed_ua = local_ag.get("computed_user_agent")
+            if computed_ua:
+                if "antigravityHeaders" in spec and isinstance(spec["antigravityHeaders"], dict):
+                    spec["antigravityHeaders"]["User-Agent"] = computed_ua
+                    spec["antigravityHeaders"]["X-Client-Name"] = local_ag.get("ide_name") or "antigravity"
+                if "loadCodeAssistHeaders" in spec and isinstance(spec["loadCodeAssistHeaders"], dict):
+                    spec["loadCodeAssistHeaders"]["User-Agent"] = computed_ua
+                    spec["loadCodeAssistHeaders"]["X-Client-Name"] = local_ag.get("ide_name") or "antigravity"
+                synced_with_local = True
+                sync_reason = (
+                    f"Sincronizado com o Antigravity instalado na máquina "
+                    f"(v{local_ver} via {local_ag.get('source_type')})"
+                )
+            if local_ag.get("product_client_version"):
+                spec["antigravityHeaders"]["X-Client-Version"] = local_ag["product_client_version"]
+                spec["loadCodeAssistHeaders"]["X-Client-Version"] = local_ag["product_client_version"]
+        else:
+            sync_reason = (
+                f"Antigravity local (v{local_ver}) é anterior ao mínimo exigido "
+                f"(v{min_supported_ua_ver}); mantendo máscara v{acp_default_ua}"
+            )
+
+    spec["localAntigravity"] = local_ag
+    spec["identifierSync"] = {
+        "synced_with_local": synced_with_local,
+        "reason": sync_reason,
+        "min_supported_version": min_supported_ua_ver,
+        "local_ide_version": local_ag.get("ide_version"),
+        "local_user_agent": local_ag.get("computed_user_agent"),
+        "acp_fallback_user_agent": acp_default_ua,
+        "active_user_agent": (spec.get("antigravityHeaders") or {}).get("User-Agent", ""),
+        "active_client_version": (spec.get("antigravityHeaders") or {}).get("X-Client-Version", acp_default_cver),
+        "checked_at": int(time.time()),
+    }
+
     _BACKEND_CACHE["spec"] = spec
     _BACKEND_CACHE["mtime"] = current_mtime
     _BACKEND_CACHE["loaded_at"] = time.time()
@@ -526,21 +800,52 @@ def update_backend_repo():
             capture_output=True, text=True, timeout=20
         )
         spec = get_backend_spec(force_reload=True)
+        summary = get_backend_status_summary(spec)
+        out_str = (pull_res.stdout or pull_res.stderr).strip()
         return {
             "success": pull_res.returncode == 0,
-            "output": (pull_res.stdout or pull_res.stderr).strip(),
-            "backend": get_backend_status_summary(spec),
+            "output": out_str,
+            "git_output": out_str,
+            "backend": summary,
+            "status": summary,
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
+def verify_and_sync_local_antigravity():
+    """
+    Forces a fresh inspection of the locally installed Antigravity binary/ASAR on the host machine
+    and synchronizes the proxy's outgoing identifiers (`User-Agent`, `X-Client-Name`, `X-Client-Version`)
+    with the local installation and `antigravity-claude-proxy`.
+    """
+    spec = get_backend_spec(force_reload=True)
+    summary = get_backend_status_summary(spec)
+    local_ag = spec.get("localAntigravity") or {}
+    sync_info = spec.get("identifierSync") or {}
+
+    return {
+        "success": True,
+        "synced_with_local": bool(sync_info.get("synced_with_local")),
+        "reason": sync_info.get("reason", ""),
+        "active_user_agent": summary.get("user_agent", ""),
+        "active_client_version": summary.get("client_version", ""),
+        "active_client_name": summary.get("client_name", "antigravity"),
+        "goog_api_client": summary.get("goog_api_client", ""),
+        "local_antigravity": local_ag,
+        "identifier_sync": sync_info,
+        "backend": summary,
+    }
+
+
 def get_backend_status_summary(spec=None):
-    """Returns a summary dict of the active antigravity-claude-proxy backend for the Web UI."""
+    """Returns a summary dict of the active antigravity-claude-proxy backend and local Antigravity sync for the Web UI."""
     if spec is None:
         spec = get_backend_spec()
     ag_headers = spec.get("antigravityHeaders", {})
     git_info = spec.get("gitInfo", {})
+    local_ag = spec.get("localAntigravity", {})
+    sync_info = spec.get("identifierSync", {})
     return {
         "connected": bool(spec.get("acpPath")),
         "acp_path": spec.get("acpPath"),
@@ -557,5 +862,7 @@ def get_backend_status_summary(spec=None):
         "endpoint_fallbacks": spec.get("endpointFallbacks", []),
         "system_instruction_masked": True,
         "anti_bot_scrub_rules_count": len(spec.get("identityScrubRules", [])),
+        "local_antigravity": local_ag,
+        "identifier_sync": sync_info,
         "loaded_at": spec.get("loadedAt", 0),
     }

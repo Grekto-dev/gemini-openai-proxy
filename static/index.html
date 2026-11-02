@@ -243,16 +243,23 @@
 
         <!-- Card 4: Backend Antigravity Claude Proxy & Mascaramento -->
         <div class="glass p-5 rounded-2xl relative overflow-hidden border border-sky-500/30">
-          <div class="flex items-center justify-between mb-2">
-            <span class="text-xs font-semibold uppercase tracking-wider text-sky-400" id="card-txt-backend">Backend & Máscara</span>
-            <button onclick="updateBackendRepo()" id="btn-update-backend" title="Atualizar antigravity-claude-proxy (git pull) e recarregar máscara" class="text-[11px] bg-sky-500/15 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 px-2.5 py-1 rounded-lg font-semibold transition flex items-center gap-1 active:scale-95">
-              <span>🔄</span>
-              <span id="txt-btn-update-acp"> Pull ACP</span>
-            </button>
+          <div class="flex items-center justify-between mb-2 gap-1">
+            <span class="text-xs font-semibold uppercase tracking-wider text-sky-400 truncate" id="card-txt-backend">Backend & Máscara</span>
+            <div class="flex items-center gap-1 shrink-0">
+              <button onclick="verifyLocalAntigravity()" id="btn-verify-local-ag" title="Verificar identificadores do Antigravity instalado na máquina e sincronizar máscara" class="text-[11px] bg-emerald-500/15 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 px-2 py-1 rounded-lg font-semibold transition flex items-center gap-1 active:scale-95">
+                <span>🔍</span>
+                <span id="txt-btn-verify-local">Sync Local</span>
+              </button>
+              <button onclick="updateBackendRepo()" id="btn-update-backend" title="Atualizar antigravity-claude-proxy (git pull) e recarregar máscara" class="text-[11px] bg-sky-500/15 hover:bg-sky-500/30 text-sky-300 border border-sky-500/30 px-2 py-1 rounded-lg font-semibold transition flex items-center gap-1 active:scale-95">
+                <span>🔄</span>
+                <span id="txt-btn-update-acp">Pull ACP</span>
+              </button>
+            </div>
           </div>
-          <div class="text-sm font-bold text-white mb-1 font-mono truncate" id="card-backend-ua" title="User-Agent mascarado do Antigravity Hub">antigravity/hub/2.25.0</div>
-          <div class="text-[11px] text-slate-400 flex items-center justify-between gap-1">
-            <span id="card-backend-ver" class="font-mono text-emerald-400">ACP v2.7.7 • [ignore] + Scrub</span>
+          <div class="text-sm font-bold text-white mb-1 font-mono truncate" id="card-backend-ua" title="User-Agent mascarado do Antigravity Hub">antigravity/hub/2.24.0</div>
+          <div class="text-[11px] text-slate-400 flex flex-col gap-0.5">
+            <span id="card-backend-ver" class="font-mono text-emerald-400 truncate">ACP v2.7.7 • [ignore] + Scrub</span>
+            <span id="card-local-ag-sync" class="font-mono text-[10px] text-sky-300 truncate">Verificando instalação local...</span>
           </div>
         </div>
 
@@ -1009,6 +1016,7 @@ print(res.choices[0].message.content)</code></pre>
         if (data.backend) {
           const uaEl = document.getElementById('card-backend-ua');
           const verEl = document.getElementById('card-backend-ver');
+          const syncEl = document.getElementById('card-local-ag-sync');
           const epEl = document.getElementById('card-endpoint');
           if (uaEl && data.backend.user_agent) uaEl.innerText = data.backend.user_agent;
           if (verEl) {
@@ -1016,6 +1024,18 @@ print(res.choices[0].message.content)</code></pre>
             const acpVer = data.backend.package_version || data.backend.acp_version || '2.7.7';
             const mode = data.backend.extraction_mode === 'node-esm-bridge' ? 'Node ESM Bridge' : 'Source Parser';
             verEl.innerText = `X-Client: ${cVer} • ACP v${acpVer} (${mode})`;
+          }
+          if (syncEl) {
+            const loc = data.backend.local_antigravity || {};
+            const syncInfo = data.backend.identifier_sync || {};
+            if (loc.installed && syncInfo.synced_with_local) {
+              const clTxt = loc.language_server_cl ? ` • CL ${loc.language_server_cl}` : '';
+              syncEl.innerText = `✓ Local v${loc.ide_version} (${loc.source_type || 'app.asar'}${clTxt})`;
+              syncEl.className = 'font-mono text-[10px] text-emerald-300 truncate';
+            } else {
+              syncEl.innerText = `⚡ Fallback ACP (${data.backend.user_agent || ''})`;
+              syncEl.className = 'font-mono text-[10px] text-amber-300 truncate';
+            }
           }
           const endpoints = data.backend.endpoint_fallbacks || data.backend.endpoints || [];
           if (epEl && endpoints.length > 0) {
@@ -1025,6 +1045,53 @@ print(res.choices[0].message.content)</code></pre>
         }
       } catch (e) {
         console.error('Erro ao atualizar cotas:', e);
+      }
+    }
+
+    async function verifyLocalAntigravity() {
+      const btn = document.getElementById('btn-verify-local-ag');
+      const origHtml = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = '<span>⏳</span> <span>Verificando...</span>';
+      try {
+        const res = await fetch('/api/backend/verify-local', { method: 'POST' });
+        const data = await res.json();
+        await loadQuotas();
+        await loadLogs();
+        const loc = data.local_antigravity || {};
+        const sync = data.identifier_sync || {};
+        if (data.success) {
+          const msg = currentLang === 'pt-BR'
+            ? [
+                `🔍 Verificação do Antigravity Instalado na Máquina:`,
+                ``,
+                `• Status: ${sync.synced_with_local ? '✓ SINCRONIZADO COM INSTALAÇÃO LOCAL' : '⚠ USANDO FALLBACK DO ACP'}`,
+                `• Fonte Local: ${loc.source || 'Não encontrado'}`,
+                `• Versão Antigravity Local (IDE): v${loc.ide_version || 'N/A'}`,
+                `• Language Server Changelist: CL ${loc.language_server_cl || 'N/A'} (${loc.language_server_built_on || 'N/A'})`,
+                `• CLI agy: v${loc.agy_cli_version || 'N/A'} (${loc.agy_cli_path || 'N/A'})`,
+                ``,
+                `🛡️ Identificadores Ativos Enviados pelo Proxy:`,
+                `• User-Agent: ${data.active_user_agent}`,
+                `• X-Client-Name: ${data.active_client_name}`,
+                `• X-Client-Version: ${data.active_client_version}`,
+                `• x-goog-api-client: ${data.goog_api_client}`
+              ].join('\n')
+            : [
+                `🔍 Local Antigravity Installation Check:`,
+                ``,
+                `• Status: ${sync.synced_with_local ? '✓ SYNCED WITH LOCAL INSTALL' : '⚠ USING ACP FALLBACK'}`,
+                `• Local Source: ${loc.source || 'Not found'}`,
+                `• Local Antigravity Version: v${loc.ide_version || 'N/A'}`,
+                `• Language Server CL: ${loc.language_server_cl || 'N/A'}`,
+                `• Active User-Agent: ${data.active_user_agent}`,
+                `• Active X-Client-Version: ${data.active_client_version}`
+              ].join('\n');
+          alert(msg);
+        }
+      } catch (e) {
+        alert('Erro ao verificar Antigravity local: ' + e.message);
+      } finally {
+        if (btn) btn.innerHTML = origHtml;
       }
     }
 
