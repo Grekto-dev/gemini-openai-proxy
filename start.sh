@@ -1,17 +1,39 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Gemini OpenAI Proxy - Launcher Script
-# Starts the background proxy server and web dashboard
+#
+# Modes:
+#   ./start.sh            -> Runs in Foreground (bound to this terminal window;
+#                            closing the terminal or pressing Ctrl+C stops the server)
+#   ./start.sh --silent   -> Runs detached in Background (independent of terminal;
+#   ./start.sh silent        also accepts -s / silent)
 # ==============================================================================
 
 set -e
 
-# Change directory to the script's location
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 cd "$DIR"
 
 PID_FILE="$DIR/proxy.pid"
 LOG_FILE="$DIR/server.log"
+
+SILENT_MODE=0
+for arg in "$@"; do
+    case "$arg" in
+        silent|--silent|-s)
+            SILENT_MODE=1
+            ;;
+        -h|--help|help)
+            echo "Uso: ./start.sh [opções]"
+            echo ""
+            echo "Opções:"
+            echo "  (sem argumentos)       Executa vinculado ao terminal atual (se fechar a janela, o servidor encerra junto)"
+            echo "  silent, --silent, -s   Executa silenciosamente em segundo plano (independente do terminal)"
+            echo "  --help, -h             Exibe esta mensagem de ajuda"
+            exit 0
+            ;;
+    esac
+done
 
 # Check if already running
 if [ -f "$PID_FILE" ]; then
@@ -45,29 +67,43 @@ PORT=$(python3 -c "import config; print(config.load_config().get('port', 8000))"
 echo -e "\033[1;34m========================================================\033[0m"
 echo -e "\033[1;36m       Gemini Google AI Pro -> OpenAI Proxy Server      \033[0m"
 echo -e "\033[1;34m========================================================\033[0m"
-echo -e "[*] Iniciando servidor em background..."
 
-# Run server in background fully detached with setsid
-setsid python3 -u server.py >> "$LOG_FILE" 2>&1 &
-SERVER_PID=$!
-echo "$SERVER_PID" > "$PID_FILE"
+if [ "$SILENT_MODE" -eq 1 ]; then
+    echo -e "[*] Iniciando servidor em segundo plano (\033[1;35mmodo silent\033[0m)..."
+    export PROXY_SILENT_MODE=1
+    nohup setsid python3 -u server.py --silent >> "$LOG_FILE" 2>&1 < /dev/null &
+    SERVER_PID=$!
+    echo "$SERVER_PID" > "$PID_FILE"
 
-# Wait a moment to check if process stays alive
-sleep 1.2
-if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-    echo -e "\033[1;31m[ERRO] O servidor falhou ao iniciar. Verifique o log:\033[0m"
-    tail -n 15 "$LOG_FILE"
-    rm -f "$PID_FILE"
-    exit 1
+    sleep 1.2
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        echo -e "\033[1;31m[ERRO] O servidor falhou ao iniciar. Verifique o log:\033[0m"
+        tail -n 15 "$LOG_FILE"
+        rm -f "$PID_FILE"
+        exit 1
+    fi
+
+    echo -e "\033[1;32m[✓] Servidor iniciado em background! (PID: $SERVER_PID)\033[0m"
+    echo ""
+    echo -e "  🌐 \033[1mDashboard Web:\033[0m      \033[1;36mhttp://${HOST}:${PORT}/\033[0m"
+    echo -e "  🔌 \033[1mOpenAI Base URL:\033[0m    \033[1;32mhttp://${HOST}:${PORT}/v1\033[0m"
+    echo -e "  📊 \033[1mCotas & Limites:\033[0m    \033[1;33mhttp://${HOST}:${PORT}/account-limits\033[0m"
+    echo ""
+    echo -e "  📋 Comandos úteis:"
+    echo -e "     - Para visualizar logs em tempo real: \033[1;35mtail -f server.log\033[0m"
+    echo -e "     - Para encerrar o servidor:           \033[1;31m./stop.sh\033[0m"
+    echo -e "\033[1;34m========================================================\033[0m"
+else
+    echo -e "[*] Modo vinculado ao terminal ativo (feche a janela ou pressione \033[1;33mCtrl+C\033[0m para encerrar)."
+    echo -e "    💡 Dica: use \033[1;35m./start.sh --silent\033[0m para rodar em segundo plano."
+    echo ""
+    echo -e "  🌐 \033[1mDashboard Web:\033[0m      \033[1;36mhttp://${HOST}:${PORT}/\033[0m"
+    echo -e "  🔌 \033[1mOpenAI Base URL:\033[0m    \033[1;32mhttp://${HOST}:${PORT}/v1\033[0m"
+    echo -e "  📊 \033[1mCotas & Limites:\033[0m    \033[1;33mhttp://${HOST}:${PORT}/account-limits\033[0m"
+    echo -e "\033[1;34m========================================================\033[0m"
+
+    export PROXY_SILENT_MODE=0
+    export PROXY_TERMINAL_PID="$PPID"
+    echo "$$" > "$PID_FILE"
+    exec python3 -u server.py
 fi
-
-echo -e "\033[1;32m[✓] Servidor iniciado com sucesso! (PID: $SERVER_PID)\033[0m"
-echo ""
-echo -e "  🌐 \033[1mDashboard Web:\033[0m      \033[1;36mhttp://${HOST}:${PORT}/\033[0m"
-echo -e "  🔌 \033[1mOpenAI Base URL:\033[0m    \033[1;32mhttp://${HOST}:${PORT}/v1\033[0m"
-echo -e "  📊 \033[1mCotas & Status:\033[0m     \033[1;33mhttp://${HOST}:${PORT}/v1/quota\033[0m"
-echo ""
-echo -e "  📋 Comandos úteis:"
-echo -e "     - Para visualizar logs em tempo real: \033[1;35mtail -f server.log\033[0m"
-echo -e "     - Para encerrar o servidor:           \033[1;31m./stop.sh\033[0m"
-echo -e "\033[1;34m========================================================\033[0m"

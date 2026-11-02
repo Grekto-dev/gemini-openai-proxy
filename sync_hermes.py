@@ -51,21 +51,27 @@ def get_proxy_models(proxy_url=DEFAULT_PROXY_URL):
 
     # Fallback to known Google AI Pro models list
     return [
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "claude-sonnet-5-5",
         "claude-opus-5-5",
         "gemini",
         "claude",
+        "gemini-4-argon-high",
+        "gemini-4-argon-medium",
+        "gemini-4-argon-low",
         "gemini-3.8-flash-high",
         "gemini-3.8-flash-medium",
         "gemini-3.8-flash-low",
+        "gemini-3.5-flash-lite",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
         "claude-sonnet-5-5-high",
         "claude-sonnet-5-5-medium",
         "claude-sonnet-5-5-low",
         "claude-opus-5-5-high",
         "claude-opus-5-5-medium",
         "claude-opus-5-5-low",
-        "gemini-2.5-flash",
         "gpt-oss-120b-medium"
     ]
 

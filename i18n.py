@@ -150,15 +150,32 @@ UI_TRANSLATIONS = {
 }
 
 
-def log_terminal(key, **kwargs):
-    """Prints a localized terminal message using current configuration."""
+def log_terminal(key, details=None, **kwargs):
+    """Prints a localized terminal message and records it in the structured logger."""
+    import logger
     cfg = load_config()
     lang = cfg.get("language", "pt-BR")
     table = TERMINAL_STRINGS.get(lang, TERMINAL_STRINGS["pt-BR"])
     template = table.get(key, key)
-    time_str = datetime.now().strftime("%H:%M:%S")
     formatted = template.format(**kwargs)
-    print(f"\033[90m[{time_str}]\033[0m {formatted}")
+
+    # Map message keys to log levels and categories automatically
+    level = "INFO"
+    category = "PROXY"
+    if key in ("upstream_err", "auth_error"):
+        level = "ERROR"
+        category = "UPSTREAM" if key == "upstream_err" else "AUTH"
+    elif key in ("server_stopped", "auth_cleared", "account_removed"):
+        level = "WARN"
+        category = "AUTH" if "auth" in key or "account" in key else "PROXY"
+    elif key in ("auth_ok", "account_switched", "account_added", "oauth_started"):
+        category = "AUTH"
+    elif key in ("tool_call", "tool_result"):
+        category = "TOOL"
+    elif key in ("request_recv", "completed"):
+        category = "REQ"
+
+    logger.record_log(level, category, formatted, details=details, print_to_terminal=True)
 
 
 def get_ui_translations(lang="pt-BR"):

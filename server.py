@@ -16,6 +16,8 @@ import os
 import json
 import time
 import uuid
+import signal
+import urllib.parse
 import requests
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
@@ -24,15 +26,20 @@ import converter
 import config
 import accounts
 import api_keys
+import acp_backend
+import logger
 from i18n import log_terminal, get_ui_translations
 
-STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+PID_FILE = os.path.join(BASE_DIR, "proxy.pid")
 
 # State for pause/resume toggle
 SERVER_STATE = {"running": True}
 
 AVAILABLE_MODELS = [
     # Dynamic-effort base models (Hermes controls effort dynamically)
+    {"id": "gemini-4-argon", "name": "Gemini 4 Argon (Effort Dinâmico)", "owned_by": "google"},
     {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Effort Dinâmico)", "owned_by": "google"},
     {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5 (Effort Dinâmico)", "owned_by": "anthropic"},
     {"id": "claude-opus-5-5", "name": "Claude Opus 5.5 (Effort Dinâmico)", "owned_by": "anthropic"},
@@ -40,21 +47,48 @@ AVAILABLE_MODELS = [
     {"id": "claude", "name": "Claude (Alias Dinâmico)", "owned_by": "anthropic"},
 
     # Explicit tier models (Fixed Effort)
+    {"id": "gemini-4-argon-high", "name": "Gemini 4 Argon (High)", "owned_by": "google"},
+    {"id": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)", "owned_by": "google"},
+    {"id": "gemini-4-argon-low", "name": "Gemini 4 Argon (Low)", "owned_by": "google"},
     {"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)", "owned_by": "google"},
     {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)", "owned_by": "google"},
     {"id": "gemini-3.8-flash-low", "name": "Gemini 3.8 Flash (Low)", "owned_by": "google"},
+    {"id": "gemini-3.8-flash-tiered", "name": "Gemini 3.8 Flash (Tiered)", "owned_by": "google"},
+    {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "owned_by": "google"},
+    {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "owned_by": "google"},
+    {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "owned_by": "google"},
+    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "owned_by": "google"},
     {"id": "claude-sonnet-5-5-high", "name": "Claude Sonnet 5.5 (High)", "owned_by": "anthropic"},
     {"id": "claude-sonnet-5-5-medium", "name": "Claude Sonnet 5.5 (Medium)", "owned_by": "anthropic"},
     {"id": "claude-sonnet-5-5-low", "name": "Claude Sonnet 5.5 (Low)", "owned_by": "anthropic"},
     {"id": "claude-opus-5-5-high", "name": "Claude Opus 5.5 (High)", "owned_by": "anthropic"},
     {"id": "claude-opus-5-5-medium", "name": "Claude Opus 5.5 (Medium)", "owned_by": "anthropic"},
     {"id": "claude-opus-5-5-low", "name": "Claude Opus 5.5 (Low)", "owned_by": "anthropic"},
-    {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "owned_by": "google"},
     {"id": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)", "owned_by": "openai"}
 ]
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        """
+        Suppress noisy BaseHTTPRequestHandler stderr lines for routine dashboard polling,
+        while automatically capturing HTTP 4xx/5xx responses in the structured logger.
+        """
+        try:
+            status_code = int(args[1]) if len(args) > 1 else 200
+        except Exception:
+            status_code = 200
+
+        req_line = str(args[0]) if args else ""
+        if status_code >= 400:
+            logger.record_log(
+                "WARN" if status_code < 500 else "ERROR",
+                "HTTP",
+                f"HTTP {status_code} em {req_line}",
+                details={"status": status_code, "request": req_line, "client": self.client_address[0]},
+                print_to_terminal=True
+            )
+
     def _send_cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
@@ -181,7 +215,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             }).encode("utf-8"))
             return
 
-        # 4. Real-time Quota Consumption (Instant refresh without caching)
+        # 4. Real-time Quota Consumption & Antigravity Claude Proxy Account Limits
         if self.path.startswith("/v1/quota") or self.path.startswith("/quota"):
             try:
                 quota_info = auth.get_quota_details()
@@ -198,6 +232,35 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": f"Failed to retrieve quota: {str(e)}"}).encode("utf-8"))
+            return
+
+        if self.path.startswith("/account-limits"):
+            try:
+                quota_info = auth.get_quota_details()
+                limits_payload = dict(quota_info.get("account_limits") or {})
+                limits_payload["pools"] = quota_info.get("pools", [])
+                limits_payload["backend"] = quota_info.get("backend", {})
+                limits_payload["detailedModels"] = quota_info.get("models", [])
+                self.send_response(200)
+                self._send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+                self.end_headers()
+                self.wfile.write(json.dumps(limits_payload, indent=2).encode("utf-8"))
+            except Exception as e:
+                self.send_response(500)
+                self._send_cors_headers()
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(json.dumps({"error": str(e)}).encode("utf-8"))
+            return
+
+        if self.path == "/api/backend/status":
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(acp_backend.get_backend_status_summary(), indent=2).encode("utf-8"))
             return
 
         # 5. Configuration API
@@ -280,6 +343,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     "quota_endpoint": "/v1/quota"
                 }
             except Exception as e:
+                logger.log_error("AUTH", f"Healthcheck degradado: {e}", exc=e)
                 status = {"status": "degraded", "error": str(e)}
 
             self.send_response(200)
@@ -287,6 +351,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(status, indent=2).encode("utf-8"))
+            return
+
         # 12. Hermes Agent Sync API
         if self.path == "/api/hermes/sync":
             try:
@@ -298,13 +364,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps(res).encode("utf-8"))
             except Exception as e:
+                logger.log_error("PROXY", f"Erro ao sincronizar com Hermes: {e}", exc=e)
                 self.send_response(500)
                 self._send_cors_headers()
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode("utf-8"))
+            return
+
         # 13. API Keys List API
-        if self.path == "/api/keys":
+        if self.path.startswith("/api/keys"):
             keys = api_keys.list_keys()
             self.send_response(200)
             self._send_cors_headers()
@@ -313,8 +382,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"keys": keys}).encode("utf-8"))
             return
 
+        # 14. Structured Logs & Error Stream API
+        if self.path.startswith("/api/logs"):
+            parsed = urllib.parse.urlparse(self.path)
+            qs = urllib.parse.parse_qs(parsed.query)
+            try:
+                since_id = int(qs.get("since_id", ["0"])[0])
+            except ValueError:
+                since_id = 0
+            level = qs.get("level", [None])[0]
+            try:
+                limit = int(qs.get("limit", ["200"])[0])
+            except ValueError:
+                limit = 200
+            payload = logger.get_logs(since_id=since_id, level=level, limit=limit)
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.end_headers()
+            self.wfile.write(json.dumps(payload).encode("utf-8"))
+            return
+
         self.send_response(404)
+        self._send_cors_headers()
+        self.send_header("Content-Type", "application/json")
         self.end_headers()
+        self.wfile.write(json.dumps({"error": f"Endpoint not found: {self.path}"}).encode("utf-8"))
 
     def do_POST(self):
         # 1. Update Config API
@@ -509,10 +603,49 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode("utf-8"))
             return
 
+        # 9b. Update / Sync antigravity-claude-proxy Backend Repository
+        if self.path == "/api/backend/update":
+            res = acp_backend.update_backend_repo()
+            logger.record_log(
+                "INFO" if res.get("success") else "ERROR",
+                "BACKEND",
+                f"Atualização git pull do backend antigravity-claude-proxy: {res.get('git_output', '')}",
+                details=res
+            )
+            self.send_response(200 if res.get("success") else 500)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode("utf-8"))
+            return
+
+        # 9c. Clear Logs API
+        if self.path == "/api/logs/clear":
+            res = logger.clear_logs()
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode("utf-8"))
+            return
+
+        # 9d. Self-Diagnostics API
+        if self.path == "/api/diagnostics/run":
+            res = logger.run_self_diagnostics()
+            self.send_response(200)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode("utf-8"))
+            return
+
         # 10. OpenAI Chat Completions API
         if not self.path.startswith("/v1/chat/completions") and not self.path.startswith("/chat/completions"):
             self.send_response(404)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
             self.end_headers()
+            self.wfile.write(json.dumps({"error": f"Endpoint not found: {self.path}"}).encode("utf-8"))
             return
 
         # Check API Key Authentication (enforced only if keys exist)
@@ -521,6 +654,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         # Check if proxy is currently paused
         if not SERVER_STATE.get("running", True):
+            logger.record_log("WARN", "PROXY", "Requisição bloqueada: servidor proxy está pausado.")
             self.send_response(503)
             self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
@@ -540,6 +674,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             req_data = json.loads(raw_body.decode("utf-8"))
         except Exception as e:
+            logger.log_error("REQ", f"JSON inválido no corpo da requisição: {e}", exc=e)
             self.send_response(400)
             self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
@@ -563,8 +698,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         try:
             token, project_id = auth.get_credentials()
-            payload = converter.openai_to_google_request(req_data, project_id)
+            active_email = auth.get_active_email()
+            payload = converter.openai_to_google_request(req_data, project_id, account_email=active_email)
         except Exception as e:
+            logger.log_error("AUTH", f"Falha ao preparar credenciais/requisição: {e}", exc=e, extra_details={"model": requested_model})
             self.send_response(500)
             self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
@@ -572,44 +709,90 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": f"Failed to prepare request: {str(e)}"}).encode("utf-8"))
             return
 
-        headers = {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": "antigravity/2.15.0 linux/x64",
-            "X-Client-Name": "antigravity",
-            "X-Client-Version": "2.15.0"
-        }
+        session_id = payload.get("request", {}).get("sessionId")
+        headers = acp_backend.build_antigravity_headers(
+            token,
+            model=resolved_model,
+            accept="text/event-stream",
+            session_id=session_id
+        )
 
-        url = "https://daily-cloudcode-pa.googleapis.com/v1internal:streamGenerateContent?alt=sse"
+        spec = acp_backend.get_backend_spec()
+        endpoints = spec.get("endpointFallbacks") or [
+            "https://daily-cloudcode-pa.googleapis.com",
+            "https://cloudcode-pa.googleapis.com"
+        ]
 
-        try:
-            upstream_resp = requests.post(
-                url,
-                headers=headers,
-                json=payload,
-                stream=True,
-                timeout=120
+        upstream_resp = None
+        last_err = None
+        tried_endpoints = []
+        for endpoint in endpoints:
+            url = f"{endpoint}/v1internal:streamGenerateContent?alt=sse"
+            tried_endpoints.append(endpoint)
+            try:
+                resp = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    stream=True,
+                    timeout=120
+                )
+                if resp.ok:
+                    upstream_resp = resp
+                    break
+                else:
+                    last_err = (resp.status_code, resp.text)
+                    # Only try next fallback endpoint on 5xx / 404 / connection errors
+                    if resp.status_code not in (404, 408, 500, 502, 503, 504):
+                        upstream_resp = resp
+                        break
+                    logger.record_log(
+                        "WARN",
+                        "UPSTREAM",
+                        f"Endpoint {endpoint} retornou HTTP {resp.status_code}, tentando próximo fallback...",
+                        details={"endpoint": endpoint, "status": resp.status_code}
+                    )
+            except Exception as e:
+                last_err = (502, str(e))
+                logger.record_log(
+                    "WARN",
+                    "UPSTREAM",
+                    f"Falha de conexão em {endpoint}: {e}",
+                    details={"endpoint": endpoint, "error": str(e)}
+                )
+                continue
+
+        if upstream_resp is None:
+            code, msg_txt = last_err or (502, "All Cloud Code endpoints failed")
+            log_terminal(
+                "upstream_err",
+                err=f"{code}: {str(msg_txt)[:200]}",
+                details={"status": code, "response": str(msg_txt)[:1000], "tried_endpoints": tried_endpoints, "model": resolved_model}
             )
-
-            if not upstream_resp.ok:
-                err_text = upstream_resp.text
-                log_terminal("upstream_err", err=f"{upstream_resp.status_code}: {err_text[:200]}")
-                with open("server.log", "a", encoding="utf-8") as f:
-                    f.write(f"\n[ERROR 400 DEBUG]\nResp: {err_text}\nPayload: {json.dumps(payload, indent=2)}\n\n")
-                self.send_response(upstream_resp.status_code)
-                self._send_cors_headers()
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": f"Upstream error ({upstream_resp.status_code}): {err_text}"}).encode("utf-8"))
-                return
-
-        except Exception as e:
-            log_terminal("upstream_err", err=str(e))
-            self.send_response(502)
+            self.send_response(code if isinstance(code, int) else 502)
             self._send_cors_headers()
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(json.dumps({"error": f"Failed to connect to Google Cloud Code: {str(e)}"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"error": f"Failed to connect to Google Cloud Code: {msg_txt}"}).encode("utf-8"))
+            return
+
+        if not upstream_resp.ok:
+            err_text = upstream_resp.text
+            log_terminal(
+                "upstream_err",
+                err=f"{upstream_resp.status_code}: {err_text[:200]}",
+                details={
+                    "status": upstream_resp.status_code,
+                    "model": resolved_model,
+                    "upstream_response": err_text[:1500],
+                    "user_agent": headers.get("User-Agent"),
+                }
+            )
+            self.send_response(upstream_resp.status_code)
+            self._send_cors_headers()
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": f"Upstream error ({upstream_resp.status_code}): {err_text}"}).encode("utf-8"))
             return
 
         # Handle Streaming Response
@@ -848,22 +1031,94 @@ class ProxyHandler(BaseHTTPRequestHandler):
             log_terminal("completed", duration=duration)
 
 
+def _cleanup_pid_file():
+    try:
+        if os.path.exists(PID_FILE):
+            with open(PID_FILE, "r", encoding="utf-8") as f:
+                recorded_pid = f.read().strip()
+            if not recorded_pid or recorded_pid == str(os.getpid()):
+                os.remove(PID_FILE)
+    except Exception:
+        pass
+
+
 def run_server():
     cfg = config.load_config()
     host = cfg.get("host", "127.0.0.1")
     port = cfg.get("port", 8000)
 
-    # Allow CLI overrides
-    if len(sys.argv) > 1:
-        try:
-            port = int(sys.argv[1])
-        except ValueError:
-            pass
+    silent_mode = os.environ.get("PROXY_SILENT_MODE") == "1"
+    for arg in sys.argv[1:]:
+        if arg in ("--silent", "-s", "silent"):
+            silent_mode = True
+            os.environ["PROXY_SILENT_MODE"] = "1"
+        else:
+            try:
+                port = int(arg)
+            except ValueError:
+                pass
 
+    ThreadingHTTPServer.allow_reuse_address = True
     server_address = (host, port)
     httpd = ThreadingHTTPServer(server_address, ProxyHandler)
 
+    # Write current PID
+    try:
+        with open(PID_FILE, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
+    def _graceful_shutdown(signum, frame):
+        sig_name = signal.Signals(signum).name if hasattr(signal, "Signals") else str(signum)
+        logger.record_log("WARN", "PROXY", f"Sinal {sig_name} recebido. Encerrando servidor proxy e WebUI...")
+        log_terminal("shutdown")
+        _cleanup_pid_file()
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, _graceful_shutdown)
+    signal.signal(signal.SIGTERM, _graceful_shutdown)
+    if silent_mode:
+        # In silent mode, ignore SIGHUP so closing the terminal keeps the server alive
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    else:
+        # In default terminal-bound mode, closing the terminal (SIGHUP) or parent exit terminates the server immediately
+        if hasattr(signal, "SIGHUP"):
+            signal.signal(signal.SIGHUP, _graceful_shutdown)
+
+        parent_pid_env = os.environ.get("PROXY_TERMINAL_PID")
+        initial_ppid = int(parent_pid_env) if (parent_pid_env and parent_pid_env.isdigit()) else os.getppid()
+
+        def _watch_parent_terminal():
+            while True:
+                time.sleep(1.0)
+                try:
+                    # If reparented to init/systemd (PID 1) or tracked terminal PID no longer exists, shut down
+                    if os.getppid() == 1:
+                        _graceful_shutdown(signal.SIGHUP, None)
+                    if initial_ppid > 1:
+                        os.kill(initial_ppid, 0)
+                except ProcessLookupError:
+                    _graceful_shutdown(signal.SIGHUP, None)
+                except PermissionError:
+                    pass
+
+        import threading
+        watcher = threading.Thread(target=_watch_parent_terminal, daemon=True)
+        watcher.start()
+
+    mode_str = "Background Silencioso (--silent)" if silent_mode else "Vinculado ao Terminal (Foreground)"
     log_terminal("server_started", host=host, port=port)
+    logger.record_log("INFO", "PROXY", f"Modo de execução: {mode_str} (PID: {os.getpid()})")
+
+    st_backend = acp_backend.get_backend_status_summary()
+    logger.record_log(
+        "INFO",
+        "BACKEND",
+        f"Backend antigravity-claude-proxy v{st_backend.get('package_version')} ativo | UA: {st_backend.get('user_agent')}"
+    )
+
     auth_status = auth.get_auth_status()
     if auth_status.get("authenticated"):
         log_terminal("tier_info", tier=auth_status.get("tier", "Google AI Pro"), project=auth_status.get("project_id", "aicode-consumers"))
@@ -875,6 +1130,8 @@ def run_server():
         httpd.serve_forever()
     except KeyboardInterrupt:
         log_terminal("shutdown")
+    finally:
+        _cleanup_pid_file()
         httpd.server_close()
 
 

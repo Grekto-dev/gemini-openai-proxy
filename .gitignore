@@ -1,7 +1,11 @@
 # Local sensitive & runtime credentials
 accounts.json
 keys.json
+api_keys.json
 config.json
+*credentials*.json
+*token*.json
+*.tmp
 
 # Process & Logs
 *.log

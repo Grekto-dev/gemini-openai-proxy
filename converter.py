@@ -1,7 +1,11 @@
 """
 Converter module between OpenAI Chat Completions API format and Google Cloud Code API format.
+Backed by `antigravity-claude-proxy` (`acp_backend.py`) for dynamic call masking,
+session ID derivation, `[ignore]` system instruction wrapping, and anti-bot scrubbing.
+
 Handles:
-- System prompt scrubbing (neutralizing "Hermes" / "Nous Research" to prevent Google Cloud Code anti-bot blocks)
+- Antigravity call masking (`ANTIGRAVITY_SYSTEM_INSTRUCTION` + `[ignore]` wrapper, `sessionId`, `requestType`)
+- System prompt & tool description scrubbing (neutralizing "Hermes" / "Nous Research" to prevent Cloud Code 429 blocks)
 - Tool definitions (OpenAI tools -> Google functionDeclarations)
 - Tool calls (Google functionCall -> OpenAI tool_calls)
 - Tool responses (OpenAI role: 'tool' -> Google functionResponse)
@@ -12,45 +16,79 @@ Handles:
 import json
 import uuid
 import re
+import acp_backend
 
-# Identity scrubbing rules to avoid Google Cloud Code 429 RESOURCE_EXHAUSTED blocks
-IDENTITY_SCRUB_RULES = [
-    ("Nous Research", "the team"),
-    ("Hermes Agent", "Coding Assistant"),
-    ("Hermes", "Assistant"),
-    ("hermes", "assistant")
+# Fallback identity scrubbing rules (dynamically extended by acp_backend from antigravity-claude-proxy)
+FALLBACK_IDENTITY_SCRUB_RULES = [
+    ("Nous Research", "the assistant team"),
+    ("Hermes Agent", "the assistant"),
+    ("Hermes", "the assistant"),
+    ("OpenClaw", "the assistant"),
+    ("ClawdBot", "the assistant"),
+    ("OpenCode", "the coding environment"),
+    ("Claude Code", "the coding environment"),
+    ("Cursor", "the IDE"),
+    ("Cline", "the coding assistant"),
+    ("Roo Code", "the coding assistant"),
 ]
 
 GEMINI_SKIP_SIGNATURE = "skip_thought_signature_validator"
 
 
 def scrub_identity(text):
-    """Replaces third-party agent names that trigger Cloud Code filters."""
+    """
+    Replaces third-party agent names that trigger Cloud Code filters (case-insensitive).
+    Always pulls the latest rules from `antigravity-claude-proxy` via `acp_backend`.
+    """
     if not isinstance(text, str):
         return text
+    try:
+        spec = acp_backend.get_backend_spec()
+        rules = spec.get("identityScrubRules") or FALLBACK_IDENTITY_SCRUB_RULES
+    except Exception:
+        rules = FALLBACK_IDENTITY_SCRUB_RULES
+
     result = text
-    for term, replacement in IDENTITY_SCRUB_RULES:
-        result = result.replace(term, replacement)
+    for term, replacement in rules:
+        if term:
+            result = re.sub(re.escape(term), replacement, result, flags=re.IGNORECASE)
     return result
 
 
 def is_thinking_model(model_name):
     """Determines if the model supports thought/reasoning outputs."""
     lower = (model_name or "").lower()
-    return "thinking" in lower or "gemini-3" in lower or "gemini-2.5" in lower or "claude" in lower
+    return (
+        "thinking" in lower
+        or "gemini-4" in lower
+        or "gemini-3" in lower
+        or "gemini-2.5" in lower
+        or "claude" in lower
+        or "gpt-oss" in lower
+    )
 
 
 def sanitize_schema_node(node):
-    """Recursively cleans JSON schema nodes for Anthropic draft 2020-12 compatibility."""
+    """Recursively cleans JSON schema nodes for Cloud Code / Anthropic draft 2020-12 compatibility."""
     if not isinstance(node, dict):
         return node
     cleaned = dict(node)
-    for key in ["$schema", "title", "$id"]:
+    for key in [
+        "$schema", "title", "$id", "additionalProperties", "default",
+        "examples", "minLength", "maxLength", "pattern", "format",
+        "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum",
+        "minItems", "maxItems", "uniqueItems"
+    ]:
         cleaned.pop(key, None)
     if "anyOf" in cleaned or "oneOf" in cleaned:
         choices = cleaned.pop("anyOf", None) or cleaned.pop("oneOf", None)
         if isinstance(choices, list) and len(choices) > 0:
-            first = choices[0]
+            # Prefer non-null branch in Optional[T] unions
+            non_null = [
+                c for c in choices
+                if isinstance(c, dict) and c.get("type") != "null"
+            ]
+            first = non_null[0] if non_null else choices[0]
             if isinstance(first, dict):
                 if "type" in first and "type" not in cleaned:
                     cleaned["type"] = first["type"]
@@ -58,6 +96,9 @@ def sanitize_schema_node(node):
                     cleaned["items"] = first["items"]
                 if "properties" in first and "properties" not in cleaned:
                     cleaned["properties"] = first["properties"]
+    if "type" in cleaned and isinstance(cleaned["type"], list):
+        non_null_types = [t for t in cleaned["type"] if t != "null"]
+        cleaned["type"] = non_null_types[0] if non_null_types else "string"
     if "type" not in cleaned:
         if "properties" in cleaned:
             cleaned["type"] = "object"
@@ -97,15 +138,24 @@ def resolve_model_and_effort(raw_model, reasoning_effort=None):
 
     alias_map = {
         "gemini": "gemini-3.8-flash",
-        "gemini-pro": "gemini-3.8-flash",
+        "gemini-pro": "gemini-4-argon",
+        "gemini-4": "gemini-4-argon",
+        "gemini-argon": "gemini-4-argon",
+        "argon": "gemini-4-argon",
         "gemini-flash": "gemini-3.8-flash",
-        "gemini-3.1-pro-high": "gemini-3.8-flash-high",
-        "gemini-3.1-pro-low": "gemini-3.8-flash-low",
+        "gemini-3.1-pro-high": "gemini-4-argon-high",
+        "gemini-3.1-pro-low": "gemini-4-argon-low",
         "claude": "claude-sonnet-5-5",
         "claude-sonnet": "claude-sonnet-5-5",
+        "claude-sonnet-4-6": "claude-sonnet-5-5-high",
         "claude-opus": "claude-opus-5-5",
+        "claude-opus-4-6-thinking": "claude-opus-5-5-high",
     }
     base = alias_map.get(raw_model, raw_model)
+
+    # Preserve special non-tiered variants
+    if base == "gemini-3.8-flash-tiered":
+        return base, effort
 
     tier = None
     if effort in ("none", "low", "minimal"):
@@ -116,15 +166,16 @@ def resolve_model_and_effort(raw_model, reasoning_effort=None):
         tier = "high"
 
     tier_families = [
+        "gemini-4-argon",
         "gemini-3.8-flash",
         "gemini-3.7-flash",
         "gemini-3.6-flash",
         "claude-sonnet-5-5",
-        "claude-opus-5-5"
+        "claude-opus-5-5",
     ]
 
     for family in tier_families:
-        if base.startswith(family):
+        if base == family or base.startswith(family + "-"):
             if tier:
                 chosen_tier = tier
             else:
@@ -135,10 +186,17 @@ def resolve_model_and_effort(raw_model, reasoning_effort=None):
     return base, effort
 
 
-def openai_to_google_request(openai_req, project_id):
+def openai_to_google_request(openai_req, project_id, account_email=None):
     """
-    Converts an OpenAI-format chat completion request to Google Cloud Code payload.
+    Takes the request structure that `antigravity-claude-proxy` would send
+    (`buildCloudCodeRequest` via `acp_backend`), converts the incoming OpenAI
+    payload into Google Cloud Code format, applies the anti-bot identity filter,
+    and returns the masked Cloud Code envelope ready for Google.
     """
+    spec = acp_backend.get_backend_spec()
+    skip_sig = spec.get("geminiSkipSignature", GEMINI_SKIP_SIGNATURE)
+    envelope_spec = spec.get("sampleEnvelope", {})
+
     raw_model = openai_req.get("model", "gemini-3.8-flash")
     reasoning_effort = openai_req.get("reasoning_effort")
     model, effort = resolve_model_and_effort(raw_model, reasoning_effort)
@@ -158,10 +216,17 @@ def openai_to_google_request(openai_req, project_id):
         role = msg.get("role")
         content = msg.get("content")
 
-        if role == "system":
+        if role == "system" or role == "developer":
             if content:
-                scrubbed = scrub_identity(str(content))
-                system_parts.append({"text": scrubbed})
+                if isinstance(content, list):
+                    text_val = "\n".join(
+                        item.get("text", "") for item in content if isinstance(item, dict) and item.get("text")
+                    )
+                else:
+                    text_val = str(content)
+                scrubbed = scrub_identity(text_val)
+                if scrubbed:
+                    system_parts.append({"text": scrubbed})
             continue
 
         if role == "user":
@@ -170,15 +235,17 @@ def openai_to_google_request(openai_req, project_id):
                 user_parts.append({"text": content})
             elif isinstance(content, list):
                 for item in content:
+                    if not isinstance(item, dict):
+                        continue
                     if item.get("type") == "text":
                         user_parts.append({"text": item.get("text", "")})
                     elif item.get("type") == "image_url":
                         url = item.get("image_url", {}).get("url", "")
-                        if url.startswith("data:"):
+                        if url.startswith("data:") and "," in url:
                             mime = url.split(";")[0].replace("data:", "")
-                            b64 = url.split(",")[1]
+                            b64 = url.split(",", 1)[1]
                             user_parts.append({"inlineData": {"mimeType": mime, "data": b64}})
-            google_contents.append({"role": "user", "parts": user_parts or [{"text": ""}]})
+            google_contents.append({"role": "user", "parts": user_parts or [{"text": "."}]})
 
         elif role == "assistant":
             asst_parts = []
@@ -205,7 +272,7 @@ def openai_to_google_request(openai_req, project_id):
                         "name": fn_name,
                         "args": parsed_args
                     },
-                    "thoughtSignature": GEMINI_SKIP_SIGNATURE
+                    "thoughtSignature": skip_sig
                 }
                 asst_parts.append(part)
 
@@ -231,9 +298,16 @@ def openai_to_google_request(openai_req, project_id):
                 }]
             })
 
+    if not google_contents:
+        google_contents.append({"role": "user", "parts": [{"text": "."}]})
+
+    # Derive stable per-account sessionId using antigravity-claude-proxy's session-manager logic
+    session_id = acp_backend.derive_session_id(account_email)
+
     # Prepare Google request object
     google_request = {
         "contents": google_contents,
+        "sessionId": session_id,
         "generationConfig": {
             "maxOutputTokens": max_tokens,
             "temperature": temperature
@@ -243,8 +317,11 @@ def openai_to_google_request(openai_req, project_id):
     if top_p is not None:
         google_request["generationConfig"]["topP"] = top_p
 
-    if system_parts:
-        google_request["systemInstruction"] = {"parts": system_parts}
+    # Inject masked Antigravity systemInstruction with [ignore] tags + scrubbed user system parts
+    google_request["systemInstruction"] = acp_backend.get_masked_system_instruction_parts(
+        user_system_parts=system_parts,
+        scrub_fn=scrub_identity
+    )
 
     # Handle thinking configuration based on model and Hermes reasoning_effort
     if effort == "none":
@@ -265,13 +342,13 @@ def openai_to_google_request(openai_req, project_id):
             "thinkingBudget": budget
         }
 
-    # Handle Tools / Function Calling
+    # Handle Tools / Function Calling (with anti-bot scrubbing on descriptions)
     if tools and isinstance(tools, list):
         function_declarations = []
         for t in tools:
             fn = t.get("function", {})
             name = fn.get("name", "")
-            desc = fn.get("description", "")
+            desc = scrub_identity(fn.get("description", ""))
             params = sanitize_parameters(fn.get("parameters"))
 
             # Clean name for Google Cloud Code (alphanumeric and underscores, max 64 chars)
@@ -287,17 +364,22 @@ def openai_to_google_request(openai_req, project_id):
                 "functionDeclarations": function_declarations
             }]
 
-    # Build the outer envelope expected by Google Cloud Code v1internal API
+    # Build the outer envelope matching antigravity-claude-proxy's buildCloudCodeRequest
+    req_prefix = envelope_spec.get("requestIdPrefix", "agent-")
     envelope = {
         "project": project_id,
         "model": model,
         "request": google_request,
-        "userAgent": "antigravity",
-        "requestType": "agent",
-        "requestId": f"agent-{uuid.uuid4()}"
+        "userAgent": envelope_spec.get("userAgent", "antigravity"),
+        "requestType": envelope_spec.get("requestType", "agent"),
+        "requestId": f"{req_prefix}{uuid.uuid4()}"
     }
 
     return envelope
+
+
+# Alias for backward/external compatibility
+openai_to_antigravity = openai_to_google_request
 
 
 def format_openai_stream_chunk(completion_id, model, delta, finish_reason=None, usage=None):
