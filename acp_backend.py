@@ -34,6 +34,8 @@ _DEFAULT_ACP_PATHS = [
     os.environ.get("ANTIGRAVITY_CLAUDE_PROXY_PATH", ""),
     os.path.abspath(os.path.join(_THIS_DIR, "..", "antigravity-claude-proxy")),
     os.path.abspath(os.path.join(_THIS_DIR, "antigravity-claude-proxy")),
+    os.path.expanduser("~/Documentos/antigravity-claude-proxy"),
+    os.path.expanduser("~/Documents/antigravity-claude-proxy"),
     os.path.expanduser("~/.gemini/antigravity/scratch/antigravity-claude-proxy"),
 ]
 

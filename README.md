@@ -1,8 +1,27 @@
 # 🚀 Gemini Google AI Pro -> OpenAI Proxy Server (v2.0 • Antigravity Hub Backend)
 
-A high-fidelity, OpenAI-compatible proxy server (`/v1/chat/completions` and `/v1/models`) that bridges your **Google AI Pro** subscription directly to autonomous agent harnesses such as **Hermes Agent**, **Cursor**, **Cline**, **OpenCode**, and Python OpenAI SDK scripts.
+[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
+[![Backend: antigravity-claude-proxy](https://img.shields.io/badge/Backend-antigravity--claude--proxy-purple.svg)](https://github.com/badrisnarayanan/antigravity-claude-proxy)
 
-Powered by a dynamic specification bridge ([`acp_backend.py`](acp_backend.py)) over **[`antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy)**, it automatically adopts the latest official Antigravity Hub call masking, headers, system prompt wrappers, and quota retrieval protocol.
+A high-fidelity, OpenAI-compatible proxy server (`/v1/chat/completions` and `/v1/models`) that bridges your **Google AI Pro** subscription directly to OpenAI-compatible autonomous agent harnesses such as **Hermes Agent**, **Cursor**, **Cline**, **OpenCode**, and Python OpenAI SDK scripts.
+
+> **Built on top of [`badrisnarayanan/antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy)**:  
+> This project uses **[`antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy)** (created by **Badri Narayanan S**) as its core backend specification and call-masking engine. While `antigravity-claude-proxy` exposes an Anthropic Messages API (`/v1/messages`) for Claude Code, `gemini-openai-proxy` builds an **OpenAI-compatible translation layer (`/v1/chat/completions`)**, an **anti-bot identity scrubbing filter**, and **Hermes Agent auto-synchronization** on top of `antigravity-claude-proxy`'s upstream Cloud Code protocol.
+
+---
+
+## 🏗️ How It Builds Upon `antigravity-claude-proxy`
+
+1. **Dynamic Upstream Masking (`acp_backend.py`)**:
+   - Directly executes/parses [`src/constants.js`](https://github.com/badrisnarayanan/antigravity-claude-proxy/blob/main/src/constants.js) and [`src/cloudcode/request-builder.js`](https://github.com/badrisnarayanan/antigravity-claude-proxy/blob/main/src/cloudcode/request-builder.js) from `antigravity-claude-proxy` at runtime.
+   - Inherits the latest official `User-Agent: antigravity/hub/<version>`, `X-Client-Name: antigravity`, `X-Client-Version`, `x-goog-api-client`, `CLIENT_METADATA`, and the `ANTIGRAVITY_SYSTEM_INSTRUCTION` with `[ignore]...[/ignore]` wrapping.
+   - Automatically detects updates when `antigravity-claude-proxy` is updated via `git pull` (or via the 1-click update button in the WebUI), guaranteeing future-proof compatibility without manual rewrites.
+2. **OpenAI Format Translation (`converter.py`)**:
+   - Translates OpenAI `messages`, `reasoning_effort`, `tools`, `tool_calls`, and `role: "tool"` multi-turn outputs into the Cloud Code envelope structure defined by `antigravity-claude-proxy`, and streams back OpenAI SSE chunks (`chat.completion.chunk` with `reasoning_content`).
+3. **Anti-Bot Client Identity Filter (`scrub_identity`)**:
+   - Before dispatching the masked payload to Google Cloud Code, applies case-insensitive regex scrubbing across system instructions and tool descriptions to neutralize third-party agent identifiers (`Hermes Agent`, `Nous Research`, `OpenCode`, `Claude Code`, `Cursor`, `Cline`, etc.).
+4. **Unified Quota & Account Limits Protocol (`auth.py`)**:
+   - Implements `antigravity-claude-proxy`'s `v1internal:loadCodeAssist` + `v1internal:fetchAvailableModels` pipeline and `/account-limits` format to unlock and track the **Gemini 4 Argon** (`gemini-4-argon-*`), **Gemini 3.8 / 2.5**, and **Claude 5.5** quota pools in real time.
 
 ---
 
@@ -10,11 +29,7 @@ Powered by a dynamic specification bridge ([`acp_backend.py`](acp_backend.py)) o
 
 - **Dynamic `antigravity-claude-proxy` Backend Bridge (`acp_backend.py`)**:
   - Dynamically extracts `ANTIGRAVITY_HEADERS`, `LOAD_CODE_ASSIST_HEADERS`, `CLIENT_METADATA`, `ANTIGRAVITY_SYSTEM_INSTRUCTION`, and `endpointFallbacks` (`daily-cloudcode-pa.googleapis.com` -> `cloudcode-pa.googleapis.com`) directly from the `antigravity-claude-proxy` ESM modules via Node.js (with a pure-Python parser fallback).
-  - **Future-Proof Auto-Reload**: Monitors file modification timestamps (`mtime`) on `antigravity-claude-proxy` and exposes a 1-click **`↻ git pull`** button in the WebUI (`/api/backend/update`), immediately applying any future upstream masking updates without code changes.
-- **Multi-Layer Call Masking & Anti-Bot Identity Filter**:
-  1. Converts incoming OpenAI requests (`messages`, `tools`, `reasoning_effort`) into Google Cloud Code format.
-  2. Applies the **Anti-Bot Identity Scrubbing Filter** (`scrub_identity`) across all system prompts and tool descriptions to strip third-party harness signatures (`Hermes Agent`, `Nous Research`, `OpenCode`, `Claude Code`, `Cursor`, etc.).
-  3. Injects the official `ANTIGRAVITY_SYSTEM_INSTRUCTION` identity preamble with the `Please ignore the following [ignore]...[/ignore]` wrapper and official `antigravity/hub/<version>` headers (`X-Client-Name: antigravity`, `X-Client-Version`, `x-goog-api-client`, deterministic `X-Machine-Session-Id`).
+  - **Future-Proof Auto-Reload**: Monitors file modification timestamps (`mtime`) on `antigravity-claude-proxy` and exposes a 1-click **`↻ git pull`** button in the WebUI (`/api/backend/update`).
 - **Unlocked `gemini-4-argon` Model Family**:
   - Full support for the **Gemini 4 Argon** pool (`gemini-4-argon` with adaptive effort, `gemini-4-argon-high`, `gemini-4-argon-medium`, `gemini-4-argon-low`), alongside **Gemini 3.8 Flash**, **Claude Sonnet 5.5**, and **Claude Opus 5.5**.
 - **Updated Quota & Account Limits Protocol (`/v1/quota` & `/account-limits`)**:
@@ -49,7 +64,8 @@ gemini-openai-proxy/
 ├── i18n.py               # Internationalization dictionary (PT-BR / EN) and terminal logger
 ├── static/
 │   └── index.html        # Responsive Web Dashboard (Pools, /account-limits, Backend status, Live Logs)
-├── test_client.py        # End-to-end integration & debugging test suite
+├── test_client.py        # End-to-end 9-stage integration & debugging test suite
+├── LICENSE               # MIT License (with attribution to antigravity-claude-proxy)
 └── README.md             # Project documentation
 ```
 
@@ -129,7 +145,7 @@ hermes --provider custom:google-ai-pro -m gemini-3.8-flash
 
 ## 🧪 Running the Test & Debugging Battery
 
-Run the automated test suite to verify backend extraction, anti-bot scrubbing, quota retrieval, streaming/non-streaming completions, and error logging:
+Run the automated 9-stage test suite to verify backend extraction, anti-bot scrubbing, quota retrieval, streaming/non-streaming completions, and error logging:
 ```bash
 python3 test_client.py
 ```
@@ -138,5 +154,19 @@ python3 test_client.py
 
 ## 🔒 Security & Credential Safety
 
-- All local credentials (`accounts.json`, `keys.json`, `config.json`, `.env`, `*.log`, `*.pid`) are strictly git-ignored.
+- All local credentials (`accounts.json`, `keys.json`, `api_keys.json`, `config.json`, `.env`, `*.log`, `*.pid`) are strictly git-ignored.
 - `logger.py` automatically redacts `Bearer` tokens, Google OAuth `ya29.*` / `1//*` tokens, and `sk-*` keys before writing to `server.log` or exposing logs in the WebUI.
+
+---
+
+## 🙏 Acknowledgments & Credits (Agradecimentos)
+
+Special thanks to **[Badri Narayanan S (`@badrisnarayanan`)](https://github.com/badrisnarayanan)** and all contributors to **[`antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy)**.
+
+`gemini-openai-proxy` is built directly on top of the Cloud Code protocol research, call-identifier masking (`ANTIGRAVITY_HEADERS`, `ANTIGRAVITY_SYSTEM_INSTRUCTION`, `CLIENT_METADATA`), and quota discovery architecture pioneered and actively maintained by `antigravity-claude-proxy`.
+
+---
+
+## 📄 License
+
+This project is licensed under the **[MIT License](LICENSE)** — the same open-source license used by [`antigravity-claude-proxy`](https://github.com/badrisnarayanan/antigravity-claude-proxy/blob/main/LICENSE), preserving full copyright attribution to both projects.
