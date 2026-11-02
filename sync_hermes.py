@@ -78,72 +78,90 @@ def get_proxy_models(proxy_url=DEFAULT_PROXY_URL):
 
 def sync_to_hermes(proxy_url=DEFAULT_PROXY_URL, set_as_default=False):
     """
-    Exports models to Hermes Agent:
-    1. Updates ~/.hermes/config.yaml using ruamel.yaml via Hermes python.
-    2. Updates ~/.hermes/provider_models_cache.json.
+    Exports models to Hermes Agent (default home + all active profiles in ~/.hermes/profiles/):
+    1. Updates config.yaml using ruamel.yaml via Hermes python (preserving comments, quotes, and width=4096).
+    2. Updates provider_models_cache.json.
     """
     if not os.path.exists(HERMES_DIR):
         raise FileNotFoundError(f"Diretório do Hermes não encontrado em {HERMES_DIR}")
 
     models = get_proxy_models(proxy_url)
-
     hermes_agent_dir = os.path.join(HERMES_DIR, "hermes-agent")
 
-    # 1. Update config.yaml via Hermes's own ruamel.yaml engine to preserve comments
+    # Collect target Hermes homes: main ~/.hermes + active profiles in ~/.hermes/profiles/*
+    target_homes = [HERMES_DIR]
+    profiles_dir = os.path.join(HERMES_DIR, "profiles")
+    if os.path.isdir(profiles_dir):
+        for entry in sorted(os.listdir(profiles_dir)):
+            if entry.startswith("."):
+                continue
+            prof_path = os.path.join(profiles_dir, entry)
+            if os.path.isdir(prof_path) and os.path.isfile(os.path.join(prof_path, "config.yaml")):
+                target_homes.append(prof_path)
+
+    target_configs = [os.path.join(h, "config.yaml") for h in target_homes if os.path.isfile(os.path.join(h, "config.yaml"))]
+
+    # 1. Update config.yaml via Hermes's own ruamel.yaml engine to preserve comments & quotes
     script = f"""
-import sys
+import os, sys
 sys.path.insert(0, '{hermes_agent_dir}')
 import hermes_bootstrap
 from hermes_yaml import YAML
 
 yaml = YAML()
-config_path = '{HERMES_CONFIG_PATH}'
+yaml.preserve_quotes = True
+yaml.width = 4096
 
-with open(config_path, 'r', encoding='utf-8') as f:
-    cfg = yaml.load(f)
-
-custom_providers = cfg.get('custom_providers')
-if custom_providers is None or not isinstance(custom_providers, list):
-    custom_providers = []
-    cfg['custom_providers'] = custom_providers
-
-# Find existing entry or create new
-entry = None
-for p in custom_providers:
-    if isinstance(p, dict) and (p.get('name') in ('{PROVIDER_NAME}', '{PROVIDER_DISPLAY_NAME}') or p.get('base_url') == '{proxy_url}'):
-        entry = p
-        break
-
+config_paths = {json.dumps(target_configs)}
 models_list = {json.dumps(models)}
 
-if entry is None:
-    entry = {{
-        'name': '{PROVIDER_NAME}',
-        'base_url': '{proxy_url}',
-        'api_key': 'google-ai-pro-proxy',
-        'api_mode': 'chat_completions',
-        'model': '{DEFAULT_MODEL}',
-        'models': models_list
-    }}
-    custom_providers.append(entry)
-else:
-    entry['base_url'] = '{proxy_url}'
-    entry['api_key'] = 'google-ai-pro-proxy'
-    entry['api_mode'] = 'chat_completions'
-    entry['model'] = '{DEFAULT_MODEL}'
-    entry['models'] = models_list
+for config_path in config_paths:
+    with open(config_path, 'r', encoding='utf-8') as f:
+        cfg = yaml.load(f)
 
-if {str(set_as_default)}:
-    if 'model' not in cfg or not isinstance(cfg['model'], dict):
-        cfg['model'] = {{}}
-    cfg['model']['default'] = '{DEFAULT_MODEL}'
-    cfg['model']['provider'] = 'custom'
-    cfg['model']['base_url'] = '{proxy_url}'
-    cfg['model']['api_key'] = 'google-ai-pro-proxy'
-    cfg['model']['api_mode'] = 'chat_completions'
+    custom_providers = cfg.get('custom_providers')
+    if custom_providers is None or not isinstance(custom_providers, list):
+        custom_providers = []
+        cfg['custom_providers'] = custom_providers
 
-with open(config_path, 'w', encoding='utf-8') as f:
-    yaml.dump(cfg, f)
+    entry = None
+    for p in custom_providers:
+        if isinstance(p, dict) and (p.get('name') in ('{PROVIDER_NAME}', '{PROVIDER_DISPLAY_NAME}') or p.get('base_url') == '{proxy_url}'):
+            entry = p
+            break
+
+    if entry is None:
+        entry = {{
+            'name': '{PROVIDER_NAME}',
+            'base_url': '{proxy_url}',
+            'api_key': 'google-ai-pro-proxy',
+            'api_mode': 'chat_completions',
+            'model': '{DEFAULT_MODEL}',
+            'models': models_list
+        }}
+        custom_providers.append(entry)
+    else:
+        entry['base_url'] = '{proxy_url}'
+        entry['api_key'] = 'google-ai-pro-proxy'
+        entry['api_mode'] = 'chat_completions'
+        entry['model'] = '{DEFAULT_MODEL}'
+        entry['models'] = models_list
+
+    if {str(set_as_default)}:
+        if 'model' not in cfg or not isinstance(cfg['model'], dict):
+            cfg['model'] = {{}}
+        cfg['model']['default'] = '{DEFAULT_MODEL}'
+        cfg['model']['provider'] = 'custom'
+        cfg['model']['base_url'] = '{proxy_url}'
+        cfg['model']['api_key'] = 'google-ai-pro-proxy'
+        cfg['model']['api_mode'] = 'chat_completions'
+
+    with open(config_path, 'w', encoding='utf-8') as f:
+        yaml.dump(cfg, f)
+    try:
+        os.chmod(config_path, 0o600)
+    except Exception:
+        pass
 
 print("CONFIG_UPDATED_OK")
 """
@@ -152,29 +170,31 @@ print("CONFIG_UPDATED_OK")
     if res.returncode != 0:
         raise RuntimeError(f"Erro ao atualizar config.yaml do Hermes: {res.stderr}")
 
-    # 2. Update provider_models_cache.json
-    cache_data = {}
-    if os.path.exists(HERMES_CACHE_PATH):
-        try:
-            with open(HERMES_CACHE_PATH, "r", encoding="utf-8") as f:
-                cache_data = json.load(f)
-        except Exception:
-            cache_data = {}
-
+    # 2. Update provider_models_cache.json across default home and all active profiles
     now = time.time()
-    cache_data[PROVIDER_NAME] = {
-        "fp": "proxy",
-        "at": now,
-        "models": models
-    }
-    cache_data[f"custom:{proxy_url.rstrip('/').lower()}"] = {
-        "fp": "proxy",
-        "at": now,
-        "models": models
-    }
+    for h in target_homes:
+        cache_path = os.path.join(h, "provider_models_cache.json")
+        cache_data = {}
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+            except Exception:
+                cache_data = {}
 
-    with open(HERMES_CACHE_PATH, "w", encoding="utf-8") as f:
-        json.dump(cache_data, f, indent=2, ensure_ascii=False)
+        cache_data[PROVIDER_NAME] = {
+            "fp": "proxy",
+            "at": now,
+            "models": models
+        }
+        cache_data[f"custom:{proxy_url.rstrip('/').lower()}"] = {
+            "fp": "proxy",
+            "at": now,
+            "models": models
+        }
+
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache_data, f, indent=2, ensure_ascii=False)
 
     return {
         "success": True,
@@ -183,6 +203,7 @@ print("CONFIG_UPDATED_OK")
         "default_model": DEFAULT_MODEL,
         "models_count": len(models),
         "models": models,
+        "profiles_synced": [os.path.basename(h) if h != HERMES_DIR else "default" for h in target_homes],
         "set_as_default": set_as_default
     }
 
