@@ -131,13 +131,67 @@ def sanitize_parameters(params):
     return cleaned
 
 
+def extract_reasoning_effort(openai_req):
+    """
+    Extracts the requested reasoning effort from any OpenAI / Hermes Agent request field:
+    - Top-level `reasoning_effort` (sent by Hermes CustomProfile: "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
+    - Top-level or `extra_body` `reasoning` dict (`{"enabled": bool, "effort": "..."}`)
+    - Top-level or `extra_body` `thinking` / `thinking_config` / `thinkingConfig`
+    """
+    if not isinstance(openai_req, dict):
+        return None
+
+    extra = openai_req.get("extra_body") if isinstance(openai_req.get("extra_body"), dict) else {}
+
+    # 1. Explicit top-level or extra_body reasoning_effort
+    raw_effort = openai_req.get("reasoning_effort") or extra.get("reasoning_effort")
+    if isinstance(raw_effort, str) and raw_effort.strip():
+        return raw_effort.strip().lower()
+    if raw_effort is False:
+        return "none"
+
+    # 2. Nested `reasoning` object (Hermes generic_nested_reasoning / OpenRouter shape)
+    reasoning_obj = openai_req.get("reasoning") if isinstance(openai_req.get("reasoning"), dict) else extra.get("reasoning")
+    if isinstance(reasoning_obj, dict):
+        if reasoning_obj.get("enabled") is False:
+            return "none"
+        nested_eff = reasoning_obj.get("effort")
+        if isinstance(nested_eff, str) and nested_eff.strip():
+            return nested_eff.strip().lower()
+
+    # 3. Anthropic/DeepSeek style `thinking` toggle
+    thinking_obj = openai_req.get("thinking") if isinstance(openai_req.get("thinking"), dict) else extra.get("thinking")
+    if isinstance(thinking_obj, dict):
+        if thinking_obj.get("type") == "disabled":
+            return "none"
+
+    # 4. Gemini style `thinking_config` / `thinkingConfig`
+    tcfg = (
+        openai_req.get("thinking_config")
+        or openai_req.get("thinkingConfig")
+        or extra.get("thinking_config")
+        or extra.get("thinkingConfig")
+    )
+    if isinstance(tcfg, dict):
+        if tcfg.get("include_thoughts") is False or tcfg.get("includeThoughts") is False:
+            if tcfg.get("thinking_budget") == 0 or tcfg.get("thinkingBudget") == 0:
+                return "none"
+        lvl = tcfg.get("thinking_level") or tcfg.get("thinkingLevel")
+        if isinstance(lvl, str) and lvl.strip():
+            return lvl.strip().lower()
+
+    return None
+
+
 def resolve_model_and_effort(raw_model, reasoning_effort=None):
     """
-    Dynamically maps model and effort:
-    Translates Hermes Agent reasoning_effort (none, minimal, low, medium, high, xhigh, max, ultra)
-    to Google Cloud Code's model tiers (-low, -medium, -high) and thinking configuration.
+    Dynamically maps clean base model IDs and Hermes Agent reasoning_effort
+    (none, minimal, low, medium, high, xhigh, max, ultra) to Google Cloud Code's
+    actual model tiers (-low, -medium, -high) and thinking configuration.
     """
     raw_model = (raw_model or "gemini-3.8-flash").strip()
+    if "/" in raw_model:
+        raw_model = raw_model.rsplit("/", 1)[-1].strip()
     effort = (reasoning_effort or "").lower().strip() if reasoning_effort else None
 
     alias_map = {
@@ -150,12 +204,20 @@ def resolve_model_and_effort(raw_model, reasoning_effort=None):
         "gemini-3.1-pro-high": "gemini-4-argon-high",
         "gemini-3.1-pro-low": "gemini-4-argon-low",
         "claude": "claude-sonnet-5-5",
+        "sonnet": "claude-sonnet-5-5",
         "claude-sonnet": "claude-sonnet-5-5",
+        "claude-sonnet-5.5": "claude-sonnet-5-5",
         "claude-sonnet-4-6": "claude-sonnet-5-5-high",
+        "opus": "claude-opus-5-5",
         "claude-opus": "claude-opus-5-5",
+        "claude-opus-5.5": "claude-opus-5-5",
         "claude-opus-4-6-thinking": "claude-opus-5-5-high",
+        "gpt-oss": "gpt-oss-120b-medium",
+        "gpt-oss-120b": "gpt-oss-120b-medium",
+        "gpt-oss-120b-low": "gpt-oss-120b-medium",
+        "gpt-oss-120b-high": "gpt-oss-120b-medium",
     }
-    base = alias_map.get(raw_model, raw_model)
+    base = alias_map.get(raw_model.lower(), raw_model)
 
     # Preserve special non-tiered variants
     if base == "gemini-3.8-flash-tiered":
@@ -185,6 +247,8 @@ def resolve_model_and_effort(raw_model, reasoning_effort=None):
             else:
                 suffix = base[len(family):].lstrip("-")
                 chosen_tier = suffix if suffix in ("low", "medium", "high") else "high"
+                if suffix in ("low", "medium", "high") and not effort:
+                    effort = suffix
             return f"{family}-{chosen_tier}", effort
 
     return base, effort
@@ -202,12 +266,12 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
     envelope_spec = spec.get("sampleEnvelope", {})
 
     raw_model = openai_req.get("model", "gemini-3.8-flash")
-    reasoning_effort = openai_req.get("reasoning_effort")
+    reasoning_effort = extract_reasoning_effort(openai_req)
     model, effort = resolve_model_and_effort(raw_model, reasoning_effort)
     messages = openai_req.get("messages", [])
     tools = openai_req.get("tools")
     temperature = openai_req.get("temperature", 0.7)
-    max_tokens = openai_req.get("max_tokens", 8192)
+    max_tokens = openai_req.get("max_tokens") or openai_req.get("max_completion_tokens") or 8192
     top_p = openai_req.get("top_p")
 
     system_parts = []
@@ -332,25 +396,48 @@ def openai_to_google_request(openai_req, project_id, account_email=None):
         scrub_fn=scrub_identity
     )
 
-    # Handle thinking configuration matching antigravity-claude-proxy/src/format/request-converter.js
+    # Handle thinking configuration matching antigravity-claude-proxy & Cloud Code per-family specs
+    lower_model = (model or "").lower()
+    is_gemini_25 = "gemini-2.5" in lower_model
+    is_gpt_oss = "gpt-oss" in lower_model
+
     if effort == "none":
         if is_claude_model:
             google_request["generationConfig"]["thinkingConfig"] = {"include_thoughts": False}
         else:
-            google_request["generationConfig"]["thinkingConfig"] = {"includeThoughts": False}
+            # Setting thinkingBudget: 0 turns off internal reasoning tokens on Cloud Code Gemini models
+            google_request["generationConfig"]["thinkingConfig"] = {
+                "includeThoughts": False,
+                "thinkingBudget": 0
+            }
     elif is_thinking_model(model):
-        budget = 32000 if is_claude_model else 32768
-        if effort in ("low", "minimal"):
-            budget = 2048
+        # Graded thinking budgets corresponding to Hermes's Reasoning Effort ladder:
+        # minimal -> 1024, low -> 4096, medium -> 12288, high -> 24576, xhigh/max/ultra -> 32000/32768
+        if effort == "minimal":
+            budget = 1024
+        elif effort == "low":
+            budget = 4096
         elif effort == "medium":
-            budget = 8192
-        elif effort in ("high", "xhigh", "max", "ultra"):
+            budget = 8192 if is_gpt_oss else 12288
+        elif effort == "high":
+            budget = 24576
+        elif effort in ("xhigh", "max", "ultra"):
             budget = 32000 if is_claude_model else 32768
+        else:
+            # Default when effort is unspecified
+            budget = 8192 if is_gpt_oss else (16000 if not is_claude_model else 16384)
 
+        # Clamp budget to model family limits (Gemini 2.5 max is 24576, GPT-OSS max is 8192)
+        if is_gemini_25:
+            budget = min(budget, 24576)
+        elif is_gpt_oss:
+            budget = min(budget, 8192)
+
+        model_max_cap = 128000 if is_claude_model else (32768 if is_gpt_oss else max_output_cap)
         current_max = google_request["generationConfig"]["maxOutputTokens"]
         if current_max <= budget:
             google_request["generationConfig"]["maxOutputTokens"] = min(
-                budget + max(current_max, 8192), max_output_cap
+                budget + max(current_max, 8192), model_max_cap
             )
 
         if is_claude_model:

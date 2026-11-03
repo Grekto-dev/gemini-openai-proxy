@@ -38,33 +38,15 @@ PID_FILE = os.path.join(BASE_DIR, "proxy.pid")
 SERVER_STATE = {"running": True}
 
 AVAILABLE_MODELS = [
-    # Dynamic-effort base models (Hermes controls effort dynamically)
-    {"id": "gemini-4-argon", "name": "Gemini 4 Argon (Effort Dinâmico)", "owned_by": "google"},
-    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Effort Dinâmico)", "owned_by": "google"},
-    {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5 (Effort Dinâmico)", "owned_by": "anthropic"},
-    {"id": "claude-opus-5-5", "name": "Claude Opus 5.5 (Effort Dinâmico)", "owned_by": "anthropic"},
-    {"id": "gemini", "name": "Gemini (Alias Dinâmico)", "owned_by": "google"},
-    {"id": "claude", "name": "Claude (Alias Dinâmico)", "owned_by": "anthropic"},
-
-    # Explicit tier models (Fixed Effort)
-    {"id": "gemini-4-argon-high", "name": "Gemini 4 Argon (High)", "owned_by": "google"},
-    {"id": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)", "owned_by": "google"},
-    {"id": "gemini-4-argon-low", "name": "Gemini 4 Argon (Low)", "owned_by": "google"},
-    {"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)", "owned_by": "google"},
-    {"id": "gemini-3.8-flash-medium", "name": "Gemini 3.8 Flash (Medium)", "owned_by": "google"},
-    {"id": "gemini-3.8-flash-low", "name": "Gemini 3.8 Flash (Low)", "owned_by": "google"},
-    {"id": "gemini-3.8-flash-tiered", "name": "Gemini 3.8 Flash (Tiered)", "owned_by": "google"},
+    {"id": "gemini-4-argon", "name": "Gemini 4 Argon", "owned_by": "google"},
+    {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "owned_by": "google"},
+    {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "owned_by": "anthropic"},
+    {"id": "claude-opus-5-5", "name": "Claude Opus 5.5", "owned_by": "anthropic"},
     {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "owned_by": "google"},
     {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "owned_by": "google"},
     {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "owned_by": "google"},
     {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "owned_by": "google"},
-    {"id": "claude-sonnet-5-5-high", "name": "Claude Sonnet 5.5 (High)", "owned_by": "anthropic"},
-    {"id": "claude-sonnet-5-5-medium", "name": "Claude Sonnet 5.5 (Medium)", "owned_by": "anthropic"},
-    {"id": "claude-sonnet-5-5-low", "name": "Claude Sonnet 5.5 (Low)", "owned_by": "anthropic"},
-    {"id": "claude-opus-5-5-high", "name": "Claude Opus 5.5 (High)", "owned_by": "anthropic"},
-    {"id": "claude-opus-5-5-medium", "name": "Claude Opus 5.5 (Medium)", "owned_by": "anthropic"},
-    {"id": "claude-opus-5-5-low", "name": "Claude Opus 5.5 (Low)", "owned_by": "anthropic"},
-    {"id": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)", "owned_by": "openai"}
+    {"id": "gpt-oss-120b", "name": "GPT-OSS 120B", "owned_by": "openai"},
 ]
 
 
@@ -701,11 +683,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         is_stream = req_data.get("stream", False)
         requested_model = req_data.get("model", "gemini-3.8-flash")
-        reasoning_effort = req_data.get("reasoning_effort")
+        reasoning_effort = converter.extract_reasoning_effort(req_data)
         completion_id = f"chatcmpl-{uuid.uuid4().hex}"
 
         resolved_model, resolved_effort = converter.resolve_model_and_effort(requested_model, reasoning_effort)
-        log_model_str = f"{resolved_model} [effort: {resolved_effort}]" if resolved_effort else resolved_model
+        log_model_str = f"{requested_model} -> {resolved_model} [effort: {resolved_effort}]" if resolved_effort else f"{requested_model} -> {resolved_model}"
         log_terminal("request_recv", model=log_model_str, stream="True" if is_stream else "False")
 
         # Check if this request includes tool results

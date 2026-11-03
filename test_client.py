@@ -62,14 +62,31 @@ def test_anti_bot_and_redaction():
 
 
 def test_models():
-    print("\n--- 3. Testing GET /v1/models ---")
+    print("\n--- 3. Testing GET /v1/models (Clean Base Models & Hermes Effort Mapping) ---")
     resp = requests.get(f"{BASE_URL}/v1/models", timeout=10)
     assert resp.status_code == 200, f"Expected 200, got {resp.status_code}"
     data = resp.json()
     model_ids = [m["id"] for m in data.get("data", [])]
-    assert "gemini-4-argon" in model_ids, "Expected gemini-4-argon in /v1/models"
-    assert "gemini-3.8-flash" in model_ids, "Expected gemini-3.8-flash in /v1/models"
-    print(f"✅ Success! Models available ({len(model_ids)}): {model_ids[:5]}...")
+    expected_clean = [
+        "gemini-4-argon",
+        "gemini-3.8-flash",
+        "claude-sonnet-5-5",
+        "claude-opus-5-5",
+        "gemini-3.5-flash-lite",
+        "gemini-3-flash",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gpt-oss-120b",
+    ]
+    assert model_ids == expected_clean, f"Expected clean base models {expected_clean}, got {model_ids}"
+
+    # Verify effort mapping from Hermes menu to Google Cloud Code tiers
+    assert converter.resolve_model_and_effort("gemini-4-argon", "low") == ("gemini-4-argon-low", "low")
+    assert converter.resolve_model_and_effort("gemini-4-argon", "medium") == ("gemini-4-argon-medium", "medium")
+    assert converter.resolve_model_and_effort("gemini-4-argon", "high") == ("gemini-4-argon-high", "high")
+    assert converter.resolve_model_and_effort("claude-sonnet-5-5", "max") == ("claude-sonnet-5-5-high", "max")
+    assert converter.resolve_model_and_effort("gpt-oss-120b", "medium") == ("gpt-oss-120b-medium", "medium")
+    print(f"✅ Success! Clean models ({len(model_ids)}): {model_ids}")
     return model_ids
 
 

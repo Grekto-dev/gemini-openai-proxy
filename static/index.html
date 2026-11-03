@@ -671,20 +671,17 @@ print(res.choices[0].message.content)</code></pre>
     let currentLogLevelFilter = 'ALL';
     let lastNotifiedErrorId = 0;
 
-    // Catálogo de modelos para a aba Modelos (incluindo Gemini 4 Argon desbloqueado via Antigravity Hub)
+    // Catálogo de modelos limpo (9 modelos base; o esforço é controlado nativamente pelo menu do Hermes)
     const MODELS_CATALOG = [
-      { id: 'gemini-4-argon', name: 'Gemini 4 Argon (Effort Dinâmico)', provider: 'Google Argon', tags: ['Novo', 'Hub v2.25', 'Effort Adaptativo'], desc: 'Desbloqueado pela máscara Antigravity Hub v2.25.0. Escala automaticamente entre gemini-4-argon-low, medium e high conforme o reasoning_effort.' },
-      { id: 'gemini-4-argon-high', name: 'Gemini 4 Argon (High Fixo)', provider: 'Google Argon', tags: ['Deep Thinking', '32k Thinking'], desc: 'Força sempre o tier High do Gemini 4 Argon com raciocínio estendido profundo.' },
-      { id: 'gemini-4-argon-medium', name: 'Gemini 4 Argon (Medium Fixo)', provider: 'Google Argon', tags: ['Balanceado', 'Hub v2.25'], desc: 'Equilíbrio ideal entre raciocínio estruturado e velocidade no pool Gemini 4 Argon.' },
-      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash (Effort Dinâmico)', provider: 'Google', tags: ['Recomendado', 'Effort Adaptativo', 'Ultra Rápido'], desc: 'Totalmente compatível com o gerenciador de esforço do Hermes: escala entre low, medium e high automaticamente conforme o reasoning_effort.' },
-      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5 (Effort Dinâmico)', provider: 'Anthropic', tags: ['Recomendado', 'Coding Specialist', 'Effort Adaptativo'], desc: 'O modelo de referência para codificação. O esforço de pensamento e thinking budget são ajustados dinamicamente pelo Hermes.' },
-      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5 (Effort Dinâmico)', provider: 'Anthropic', tags: ['Raciocínio Máximo', 'Alta Fidelidade'], desc: 'Máxima capacidade de raciocínio conceitual para arquitetura de software complexa.' },
-      { id: 'gemini-3.8-flash-high', name: 'Gemini 3.8 Flash (High Fixo)', provider: 'Google', tags: ['Fixed Tier', 'Deep Thinking'], desc: 'Força sempre o nível máximo de raciocínio (32k thinking budget).' },
-      { id: 'claude-sonnet-5-5-high', name: 'Claude Sonnet 5.5 (High Fixo)', provider: 'Anthropic', tags: ['Fixed Tier', 'Deep Thinking'], desc: 'Fixado no tier mais alto de raciocínio da Anthropic.' },
+      { id: 'gemini-4-argon', name: 'Gemini 4 Argon', provider: 'Google Argon', tags: ['Novo', 'Hub v2.25', 'Esforço pelo Hermes'], desc: 'Desbloqueado via máscara Antigravity. O nível de esforço (Off, Low, Med, High, Max) selecionado no menu do Hermes é convertido automaticamente para os tiers do Cloud Code.' },
+      { id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', provider: 'Google', tags: ['Recomendado', 'Esforço pelo Hermes', 'Ultra Rápido'], desc: 'Modelo principal de alta velocidade. Ajusta automaticamente o tier (-low, -medium, -high) e o thinkingBudget conforme o menu de esforço do Hermes.' },
+      { id: 'claude-sonnet-5-5', name: 'Claude Sonnet 5.5', provider: 'Anthropic', tags: ['Recomendado', 'Coding Specialist', 'Esforço pelo Hermes'], desc: 'Especialista em programação e agentes. O esforço escolhido no menu do Hermes seleciona o tier correspondente (Low, Medium, High) e o thinking_budget.' },
+      { id: 'claude-opus-5-5', name: 'Claude Opus 5.5', provider: 'Anthropic', tags: ['Raciocínio Máximo', 'Esforço pelo Hermes'], desc: 'Máxima capacidade de raciocínio conceitual e arquitetura. Controlado diretamente pelo seletor de esforço do Hermes.' },
       { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite', provider: 'Google', tags: ['Ultra Leve', 'Cota Alta'], desc: 'Ideal para tarefas auxiliares rápidas e sumarização com consumo mínimo.' },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google', tags: ['Econômico', 'Baixa Latência'], desc: 'Respostas instantâneas para comandos diretos e validações rápidas.' },
+      { id: 'gemini-3-flash', name: 'Gemini 3 Flash', provider: 'Google', tags: ['Rápido', 'Thinking'], desc: 'Geração Gemini 3 Flash com suporte a raciocínio ajustável pelo Hermes.' },
       { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google', tags: ['Contexto Longo', 'Estável'], desc: 'Modelo Pro clássico para análise de grandes bases de código.' },
-      { id: 'gpt-oss-120b-medium', name: 'GPT-OSS 120B (Medium)', provider: 'OpenAI OSS', tags: ['Open Weight', 'Cloud Code'], desc: 'Modelo aberto de 120B parâmetros hospedado no pool secundário do Cloud Code.' }
+      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google', tags: ['Econômico', 'Baixa Latência'], desc: 'Respostas instantâneas para comandos diretos e validações rápidas.' },
+      { id: 'gpt-oss-120b', name: 'GPT-OSS 120B', provider: 'OpenAI OSS', tags: ['Open Weight', 'Cloud Code'], desc: 'Modelo aberto de 120B parâmetros hospedado no pool secundário do Cloud Code.' }
     ];
 
     // Inicialização

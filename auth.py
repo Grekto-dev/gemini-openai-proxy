@@ -507,10 +507,7 @@ def get_quota_details():
             "monthly_reset_date": next_month_dt.strftime("%d/%m/%Y"),
             "days_until_monthly_reset": days_until_monthly_reset,
             "models": [
-                {"id": "gemini-4-argon", "name": "Gemini 4 Argon (Auto)", "desc": "Effort dinâmico pelo Hermes"},
-                {"id": "gemini-4-argon-high", "name": "Gemini 4 Argon (High)", "desc": "Máximo raciocínio profundo"},
-                {"id": "gemini-4-argon-medium", "name": "Gemini 4 Argon (Medium)", "desc": "Equilíbrio ideal velocidade/qualidade"},
-                {"id": "gemini-4-argon-low", "name": "Gemini 4 Argon (Low)", "desc": "Respostas rápidas com baixo consumo"},
+                {"id": "gemini-4-argon", "name": "Gemini 4 Argon", "desc": "Esforço controlado pelo menu do Hermes (Low / Med / High)"},
             ],
         })
 
@@ -556,10 +553,11 @@ def get_quota_details():
         "monthly_reset_date": next_month_dt.strftime("%d/%m/%Y"),
         "days_until_monthly_reset": days_until_monthly_reset,
         "models": [
-            {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash (Auto)", "desc": "Effort dinâmico pelo Hermes"},
-            {"id": "gemini-3.8-flash-high", "name": "Gemini 3.8 Flash (High)", "desc": "Máxima velocidade e raciocínio"},
+            {"id": "gemini-3.8-flash", "name": "Gemini 3.8 Flash", "desc": "Esforço controlado pelo menu do Hermes (Low / Med / High)"},
             {"id": "gemini-3.5-flash-lite", "name": "Gemini 3.5 Flash Lite", "desc": "Ultra leve e rápido"},
+            {"id": "gemini-3-flash", "name": "Gemini 3 Flash", "desc": "Rápido com raciocínio"},
             {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro", "desc": "Modelo Pro clássico"},
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash", "desc": "Baixa latência"},
         ],
     })
 
@@ -605,10 +603,9 @@ def get_quota_details():
         "monthly_reset_date": next_month_dt.strftime("%d/%m/%Y"),
         "days_until_monthly_reset": days_until_monthly_reset,
         "models": [
-            {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5 (Auto)", "desc": "Effort dinâmico pelo Hermes"},
-            {"id": "claude-sonnet-5-5-high", "name": "Claude Sonnet 5.5 (High)", "desc": "Precisão máxima de raciocínio"},
-            {"id": "claude-opus-5-5", "name": "Claude Opus 5.5 (Auto)", "desc": "Alta capacidade conceitual"},
-            {"id": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)", "desc": "OpenAI Open-Weights"},
+            {"id": "claude-sonnet-5-5", "name": "Claude Sonnet 5.5", "desc": "Esforço controlado pelo menu do Hermes (Low / Med / High)"},
+            {"id": "claude-opus-5-5", "name": "Claude Opus 5.5", "desc": "Esforço controlado pelo menu do Hermes (Low / Med / High)"},
+            {"id": "gpt-oss-120b", "name": "GPT-OSS 120B", "desc": "OpenAI Open-Weights"},
         ],
     })
 

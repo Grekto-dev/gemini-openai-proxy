@@ -36,8 +36,21 @@ PROVIDER_DISPLAY_NAME = "Google AI Pro (Proxy)"
 DEFAULT_MODEL = "gemini-3.8-flash"
 
 
+CLEAN_BASE_MODELS = [
+    "gemini-4-argon",
+    "gemini-3.8-flash",
+    "claude-sonnet-5-5",
+    "claude-opus-5-5",
+    "gemini-3.5-flash-lite",
+    "gemini-3-flash",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gpt-oss-120b",
+]
+
+
 def get_proxy_models(proxy_url=DEFAULT_PROXY_URL):
-    """Fetches live model IDs from proxy /v1/models endpoint."""
+    """Fetches clean base model IDs from proxy /v1/models endpoint."""
     try:
         url = f"{proxy_url.rstrip('/')}/models"
         resp = requests.get(url, timeout=5)
@@ -49,31 +62,7 @@ def get_proxy_models(proxy_url=DEFAULT_PROXY_URL):
     except Exception:
         pass
 
-    # Fallback to known Google AI Pro models list
-    return [
-        "gemini-4-argon",
-        "gemini-3.8-flash",
-        "claude-sonnet-5-5",
-        "claude-opus-5-5",
-        "gemini",
-        "claude",
-        "gemini-4-argon-high",
-        "gemini-4-argon-medium",
-        "gemini-4-argon-low",
-        "gemini-3.8-flash-high",
-        "gemini-3.8-flash-medium",
-        "gemini-3.8-flash-low",
-        "gemini-3.5-flash-lite",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "claude-sonnet-5-5-high",
-        "claude-sonnet-5-5-medium",
-        "claude-sonnet-5-5-low",
-        "claude-opus-5-5-high",
-        "claude-opus-5-5-medium",
-        "claude-opus-5-5-low",
-        "gpt-oss-120b-medium"
-    ]
+    return list(CLEAN_BASE_MODELS)
 
 
 def sync_to_hermes(proxy_url=DEFAULT_PROXY_URL, set_as_default=False):
@@ -151,10 +140,28 @@ for config_path in config_paths:
         if 'model' not in cfg or not isinstance(cfg['model'], dict):
             cfg['model'] = {{}}
         cfg['model']['default'] = '{DEFAULT_MODEL}'
-        cfg['model']['provider'] = 'custom'
+        cfg['model']['provider'] = 'custom:{PROVIDER_NAME}'
         cfg['model']['base_url'] = '{proxy_url}'
         cfg['model']['api_key'] = 'google-ai-pro-proxy'
         cfg['model']['api_mode'] = 'chat_completions'
+    elif isinstance(cfg.get('model'), dict):
+        # Clean up any legacy effort-suffixed or bare-alias default model if pointing to this proxy
+        cur_m = str(cfg['model'].get('default') or '')
+        cur_b = str(cfg['model'].get('base_url') or '')
+        cur_p = str(cfg['model'].get('provider') or '')
+        if '{PROVIDER_NAME}' in cur_p or cur_b == '{proxy_url}':
+            legacy_clean = {{
+                'gemini': 'gemini-3.8-flash',
+                'claude': 'claude-sonnet-5-5',
+                'gpt-oss-120b-medium': 'gpt-oss-120b',
+            }}
+            if cur_m in legacy_clean:
+                cfg['model']['default'] = legacy_clean[cur_m]
+            else:
+                for fam in ('gemini-4-argon', 'gemini-3.8-flash', 'claude-sonnet-5-5', 'claude-opus-5-5'):
+                    if cur_m.startswith(fam + '-'):
+                        cfg['model']['default'] = fam
+                        break
 
     with open(config_path, 'w', encoding='utf-8') as f:
         yaml.dump(cfg, f)
